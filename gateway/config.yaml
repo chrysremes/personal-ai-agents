@@ -1,0 +1,84 @@
+# Agent Gateway Configuration (YAML)
+# This file is optional - environment variables take precedence
+# Reference: https://github.com/...
+
+# Data Classification Patterns
+data_classification:
+  # RED patterns - sensitive data, never sent to cloud
+  red_patterns:
+    - \bCPF\b
+    - \d{3}\.\d{3}\.\d{3}-\d{2}  # CPF format XXX.XXX.XXX-XX
+    - "bank account"
+    - "account number"
+    - "IRPF"
+    - "imposto de renda"
+    - "gov.br"
+    - "banco do brasil"
+    - "itau"
+    - "santander"
+    - "caixa"
+    - "boleto"
+    - "pix"
+    - "ssn"
+    - "social security"
+    - "credit card"
+    - "visa"
+    - "mastercard"
+  
+  # YELLOW patterns - requires approval before cloud transmission
+  yellow_patterns:
+    - "confidential"
+    - "proprietary"
+    - "private"
+    - "internal"
+    - "source code"
+    - "password"
+    - "secret"
+    - "api key"
+    - "token"
+
+# Server Configuration
+server:
+  environment: development
+  host: 0.0.0.0
+  port: 8000
+  log_level: INFO
+
+# Database Configuration
+database:
+  path: /data/ai-platform/gateway.db
+  pool_size: 5
+  max_overflow: 10
+
+# Authentication
+auth:
+  jwt_expiry_minutes: 15
+  refresh_token_expiry_days: 7
+  password_min_length: 8
+
+# Ollama Configuration
+ollama:
+  base_url: http://ollama:11434
+  timeout_seconds: 30
+  max_retries: 3
+
+# Model Tiers (reference, overridden by database ModelConfig table)
+models:
+  default_tier: default
+  tiers:
+    default:
+      models:
+        - qwen3.5:2b
+      timeout_seconds: 120
+    heavier:
+      models:
+        - qwen3.5:4b
+      timeout_seconds: 180
+    batch:
+      models:
+        - qwen3.5:9b
+      timeout_seconds: 600
+    cloud:
+      models:
+        - claude-code
+      timeout_seconds: 120

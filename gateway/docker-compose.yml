@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # Ollama - Local LLM inference engine
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_MAX_LOADED_MODELS: 1
+      OLLAMA_KEEP_ALIVE: 5m
+    volumes:
+      - ollama-data:/root/.ollama
+      - /mnt/data/ai-platform/models:/models
+    networks:
+      - agent-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Agent Gateway - Central routing and authentication
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gateway
+    ports:
+      - "8000:8000"
+    environment:
+      GATEWAY_ENV: production
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 8000
+      GATEWAY_LOG_LEVEL: INFO
+      GATEWAY_DB_PATH: /data/ai-platform/gateway.db
+      GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:-change-me-in-production}
+      OLLAMA_BASE_URL: http://ollama:11434
+    volumes:
+      - /mnt/data/ai-platform:/data/ai-platform
+    networks:
+      - agent-network
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  ollama-data:
+    driver: local
+
+networks:
+  agent-network:
+    driver: bridge

@@ -8,17 +8,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
+# Initialize logging (must be before other imports that use logging)
+import logging_config
+
+from db import startup_db, shutdown_db
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
+
 # Lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown"""
     # Startup
     logger.info("Agent Gateway starting...")
+    startup_db()
     
     yield
     
     # Shutdown
     logger.info("Agent Gateway shutting down...")
+    shutdown_db()
 
 # Create FastAPI app
 app = FastAPI(
