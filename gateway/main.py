@@ -13,6 +13,7 @@ import logging_config
 
 from db import startup_db, shutdown_db
 from routes_auth import router as auth_router
+from routes_chat import router as chat_router
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth_router)
+app.include_router(chat_router)
 
 # Setup logging
 logger = logging.getLogger(__name__)
