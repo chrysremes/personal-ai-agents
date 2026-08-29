@@ -14,6 +14,7 @@ import logging_config
 from db import startup_db, shutdown_db
 from routes_auth import router as auth_router
 from routes_chat import router as chat_router
+from routes_audit import router as audit_router
 
 # Setup logging
 logger = logging.getLogger(__name__)

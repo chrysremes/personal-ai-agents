@@ -118,7 +118,7 @@ logger = logging.getLogger("gateway")
 class AuditLogger:
     """
     Separate logger for audit trail
-    Will write to SQLite in full implementation
+    Writes to both stdout (JSON) and SQLite database
     """
     
     def __init__(self):
@@ -143,7 +143,7 @@ class AuditLogger:
     ) -> None:
         """
         Log action to audit trail
-        This will be saved to SQLite by the AuditLog model
+        Writes to both JSON logs (stdout) and SQLite database
         """
         log_entry = {
             "user_id": user_id,
@@ -162,7 +162,36 @@ class AuditLogger:
             "queue_wait_ms": queue_wait_ms,
         }
         
+        # Log to stdout (JSON)
         self.logger.info(json.dumps(log_entry))
+        
+        # Log to database (async, fire-and-forget)
+        try:
+            # Import here to avoid circular imports
+            from audit import log_to_database
+            
+            # Schedule database write (don't wait)
+            import asyncio
+            asyncio.create_task(
+                log_to_database(
+                    user_id=user_id,
+                    request_id=request_id,
+                    agent=agent,
+                    action=action,
+                    model=model,
+                    data_class=data_class,
+                    patterns=patterns,
+                    approval_required=approval_required,
+                    approval_status=approval_status,
+                    tokens=tokens,
+                    result=result,
+                    error=error,
+                    duration_ms=duration_ms,
+                    queue_wait_ms=queue_wait_ms,
+                )
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to schedule database audit log: {e}")
     
     def _redact_error(self, error: str) -> str:
         """Redact RED patterns from error messages before logging"""
