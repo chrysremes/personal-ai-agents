@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from types import TracebackType
 from typing import Optional
 
 
@@ -12,7 +13,8 @@ logger = logging.getLogger(__name__)
 class InferenceQueue:
     """Serialize model inference through an ``asyncio.Semaphore``."""
 
-    def __init__(self, max_concurrent: int = 1):
+    def __init__(self, max_concurrent: int = 1) -> None:
+        """Initialize a queue with the requested concurrency limit."""
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.current_request_id: Optional[str] = None
         self.queue_depth = 0
@@ -21,12 +23,20 @@ class InferenceQueue:
         """Acquire an inference slot and measure the time spent waiting."""
         self.queue_depth += 1
         queue_entry_time = time.time()
-        logger.debug("[%s] Entering inference queue. Queue depth: %s", request_id, self.queue_depth)
+        logger.debug(
+            "[%s] Entering inference queue. Queue depth: %s",
+            request_id,
+            self.queue_depth,
+        )
 
         await self.semaphore.acquire()
         queue_wait_ms = int((time.time() - queue_entry_time) * 1000)
         self.current_request_id = request_id
-        logger.info("[%s] Acquired inference lock. Queue wait: %sms", request_id, queue_wait_ms)
+        logger.info(
+            "[%s] Acquired inference lock. Queue wait: %sms",
+            request_id,
+            queue_wait_ms,
+        )
 
         return QueueContext(self, request_id, queue_wait_ms)
 
@@ -34,16 +44,29 @@ class InferenceQueue:
 class QueueContext:
     """Release an acquired inference slot when its request completes."""
 
-    def __init__(self, queue: InferenceQueue, request_id: str, queue_wait_ms: int):
+    def __init__(
+        self,
+        queue: InferenceQueue,
+        request_id: str,
+        queue_wait_ms: int,
+    ) -> None:
+        """Store the acquired queue slot and its metrics."""
         self.queue = queue
         self.request_id = request_id
         self.queue_wait_ms = queue_wait_ms
         self.start_time = time.time()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "QueueContext":
+        """Enter the acquired queue slot."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool:
+        """Release the slot and record whether its inference failed."""
         duration_ms = int((time.time() - self.start_time) * 1000)
         self.queue.semaphore.release()
         self.queue.queue_depth -= 1
@@ -57,7 +80,11 @@ class QueueContext:
                 exc_type.__name__,
             )
         else:
-            logger.info("[%s] Released inference lock. Duration: %sms", self.request_id, duration_ms)
+            logger.info(
+                "[%s] Released inference lock. Duration: %sms",
+                self.request_id,
+                duration_ms,
+            )
 
         return False
 

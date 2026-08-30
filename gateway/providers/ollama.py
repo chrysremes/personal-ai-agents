@@ -21,7 +21,11 @@ class OllamaRequestTimeout(TimeoutError):
 
 
 class OllamaUnavailable(ConnectionError):
-    """Ollama cannot be reached or returned a transient server failure."""
+    """Ollama cannot be reached because the connection was refused."""
+
+
+class OllamaServerError(ConnectionError):
+    """Ollama returned a transient 5xx response."""
 
 
 class OllamaRequestError(RuntimeError):
@@ -31,7 +35,7 @@ class OllamaRequestError(RuntimeError):
 class OllamaProvider(Provider):
     """Provider for local Ollama inference"""
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.base_url = settings.ollama_base_url
         self.default_timeout_seconds = settings.ollama_timeout_seconds
         self.client = httpx.AsyncClient(
@@ -67,8 +71,12 @@ class OllamaProvider(Provider):
         """
         return await retry_async(
             lambda: self._generate_once(prompt, model, temperature, max_tokens),
-            retryable_exceptions=(OllamaRequestTimeout, OllamaUnavailable),
-            retry_limits={OllamaUnavailable: 1},
+            retryable_exceptions=(
+                OllamaRequestTimeout,
+                OllamaUnavailable,
+                OllamaServerError,
+            ),
+            retry_limits={OllamaServerError: 1},
         )
 
     async def _generate_once(
@@ -78,57 +86,37 @@ class OllamaProvider(Provider):
         temperature: float,
         max_tokens: Optional[int],
     ) -> Dict[str, Any]:
-        """Make one Ollama request, translating HTTP failures to domain errors."""
+        """Make one Ollama request and format its successful response."""
+        request_start = time.time()
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "temperature": temperature,
+            "stream": False,
+        }
+        if max_tokens:
+            payload["num_predict"] = max_tokens
+
+        response = await self._post_generate(payload, model)
+        return self._format_result(response.json(), prompt, model, request_start)
+
+    async def _post_generate(self, payload: Dict[str, Any], model: str) -> httpx.Response:
+        """Post a request to Ollama and translate provider failures."""
         request_start = time.time()
 
         try:
-            logger.debug(f"Generating with Ollama: model={model}, prompt_len={len(prompt)}")
-            
-            # Prepare request payload
-            payload = {
-                "model": model,
-                "prompt": prompt,
-                "temperature": temperature,
-                "stream": False,
-            }
-            
-            if max_tokens:
-                payload["num_predict"] = max_tokens
-            
-            # Call Ollama API
+            logger.debug(
+                "Generating with Ollama: model=%s, prompt_len=%s",
+                model,
+                len(payload["prompt"]),
+            )
             response = await self.client.post(
                 "/api/generate",
                 json=payload,
                 timeout=self.timeout_for_model(model),
             )
             response.raise_for_status()
-            
-            data = response.json()
-            
-            # Extract response and token counts
-            generated_text = data.get("response", "")
-            
-            input_tokens = data.get("prompt_eval_count", len(prompt) // 4)
-            output_tokens = data.get("eval_count", len(generated_text) // 4)
-            
-            duration_ms = int((time.time() - request_start) * 1000)
-            
-            logger.info(
-                f"Ollama generation complete: "
-                f"model={model}, "
-                f"output_len={len(generated_text)}, "
-                f"duration_ms={duration_ms}"
-            )
-            
-            return {
-                "response": generated_text,
-                "tokens_used": {
-                    "input": input_tokens,
-                    "output": output_tokens,
-                },
-                "duration_ms": duration_ms,
-            }
-            
+            return response
         except httpx.TimeoutException:
             duration_ms = int((time.time() - request_start) * 1000)
             logger.error(f"Ollama timeout after {duration_ms}ms")
@@ -144,16 +132,47 @@ class OllamaProvider(Provider):
             status_code = e.response.status_code
             logger.error(f"Ollama HTTP error: {status_code} {e}")
             if status_code >= 500:
-                raise OllamaUnavailable(f"Ollama API error: {status_code}")
+                raise OllamaServerError(f"Ollama API error: {status_code}")
             raise OllamaRequestError(f"Ollama API error: {status_code}")
 
-        except (OllamaRequestTimeout, OllamaUnavailable, OllamaRequestError):
+        except (
+            OllamaRequestTimeout,
+            OllamaUnavailable,
+            OllamaServerError,
+            OllamaRequestError,
+        ):
             raise
         
         except Exception as e:
             duration_ms = int((time.time() - request_start) * 1000)
             logger.error(f"Ollama generation error: {e}")
             raise OllamaRequestError(f"Ollama generation failed: {e}")
+
+    def _format_result(
+        self,
+        data: Dict[str, Any],
+        prompt: str,
+        model: str,
+        request_start: float,
+    ) -> Dict[str, Any]:
+        """Convert an Ollama response into the Gateway provider contract."""
+        generated_text = data.get("response", "")
+        duration_ms = int((time.time() - request_start) * 1000)
+        tokens_used = {
+            "input": data.get("prompt_eval_count", len(prompt) // 4),
+            "output": data.get("eval_count", len(generated_text) // 4),
+        }
+        logger.info(
+            "Ollama generation complete: model=%s, output_len=%s, duration_ms=%s",
+            model,
+            len(generated_text),
+            duration_ms,
+        )
+        return {
+            "response": generated_text,
+            "tokens_used": tokens_used,
+            "duration_ms": duration_ms,
+        }
     
     async def health_check(self) -> bool:
         """

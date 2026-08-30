@@ -3,8 +3,12 @@ Agent Gateway - Main FastAPI Application
 Personal AI Agent Platform
 """
 
-from fastapi import FastAPI
+import uuid
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
 
@@ -15,6 +19,7 @@ from db import startup_db, shutdown_db
 from routes_auth import router as auth_router
 from routes_chat import router as chat_router
 from routes_audit import router as audit_router
+from errors import error_response
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -50,6 +55,50 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def request_id_from(request: Request) -> str:
+    """Use a caller-provided request ID when present, otherwise create one."""
+    return request.headers.get("X-Request-ID", str(uuid.uuid4()))
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
+    """Return the Phase 3 error envelope for normal HTTP failures."""
+    if isinstance(exc.detail, dict):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.detail,
+            headers=exc.headers,
+        )
+
+    error_codes = {
+        400: "invalid_request",
+        401: "authentication_error",
+        403: "forbidden",
+        404: "not_found",
+    }
+    return error_response(
+        exc.status_code,
+        error_codes.get(exc.status_code, "request_failed"),
+        str(exc.detail),
+        request_id_from(request),
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(
+    request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    """Expose request-validation failures through the standard error envelope."""
+    return error_response(
+        422,
+        "invalid_request",
+        "Request validation failed.",
+        request_id_from(request),
+    )
 
 # Include routers
 app.include_router(auth_router)
