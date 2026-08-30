@@ -4,7 +4,7 @@ Central authentication and routing service for Personal AI Agent Platform.
 
 - **Version**: 3.0.0
 - **Phase**: 3 (Agent Gateway + Authentication)
-- **Status**: Ready for testing and hardening
+- **Status**: Phase 3 review gaps implemented; live-host sign-off remains
 
 ## Overview
 
@@ -14,6 +14,7 @@ The Agent Gateway is a FastAPI service running in Docker that:
 - **Routes** model calls to local Qwen (via Ollama) or cloud providers (Claude Code)
 - **Enforces** single-inference-at-a-time via request queue
 - **Classifies** data and enforces RED-data local-only rules
+- **Exposes** authenticated MCP-compatible tool stubs through REST
 - **Logs** all actions to SQLite audit trail
 - **Manages** sessions and user permissions (stateless JWT)
 
@@ -74,14 +75,14 @@ The Agent Gateway is a FastAPI service running in Docker that:
 4. **Verify Gateway is running:**
    ```bash
    curl http://localhost:8000/health
-   # Expected response: {"status": "ok"}
+   # Expected keys: status, database, ollama, queue_depth
    ```
 
 5. **Create first user (one-time setup):**
    ```bash
-   curl -X POST http://localhost:8000/auth/admin/setup/user \
+   curl -X POST http://localhost:8000/admin/setup/user \
      -H "Content-Type: application/json" \
-     -d '{"username": "user", "password": "your_secure_password"}'
+     -d '{"username": "user", "password": "SecurePass1!"}'
    ```
 
 ## Installation (Manual)
@@ -126,18 +127,18 @@ Key variables (see `.env.example` for complete list):
 
 ### config.yaml
 
-Optional YAML configuration file with data classification patterns:
+The optional YAML file supplies typed defaults for server, database,
+authentication, Ollama, model, classification, and audit settings. Environment
+variables and `.env` values take precedence.
 
 ```yaml
 data_classification:
   red_patterns:
-    - \bCPF\b
-    - \d{3}\.\d{3}\.\d{3}-\d{2}  # CPF format
-    - "bank account"
-    # ... more patterns
+    - name: CPF
+      pattern: '(?<!\d)(?:\d{3}\.\d{3}\.\d{3}-\d{2}|\d{11})(?!\d)'
   yellow_patterns:
-    - "confidential"
-    - "proprietary"
+    - name: Confidential
+      pattern: '\b(?:confidential|proprietary)\b'
 ```
 
 ## API Endpoints
@@ -151,7 +152,7 @@ Login and get tokens.
 ```json
 {
   "username": "user",
-  "password": "password123"
+  "password": "SecurePass1!"
 }
 ```
 
@@ -185,7 +186,8 @@ Refresh access token using refresh token.
 ```
 
 #### `POST /auth/logout`
-Logout and revoke refresh token.
+Logout and revoke every active refresh token owned by the authenticated user.
+Requires a bearer access token.
 
 **Response (200):**
 ```json
@@ -201,7 +203,7 @@ Create first user (only active if users table is empty).
 ```json
 {
   "username": "user",
-  "password": "password123"
+  "password": "SecurePass1!"
 }
 ```
 
@@ -284,14 +286,36 @@ Approve or deny a pending chat request.
 }
 ```
 
-**Response (200):**
+**Response (200, approved):**
 ```json
 {
-  "request_id": "req-uuid-12345",
-  "status": "approved",
-  "message": "Request approved. Please resubmit to process."
+  "id": "req-uuid-12345",
+  "model_used": "claude-code",
+  "data_class": "YELLOW",
+  "data_class_patterns": ["Confidential"],
+  "approval_required": false,
+  "approval_status": "user_approved",
+  "response": "...",
+  "tokens_used": {"input": 12, "output": 50},
+  "duration_ms": 8500
 }
 ```
+
+Pending approvals are bound to the requesting user and expire after five
+minutes. RED requests can only execute through a local allowlisted model.
+
+### MCP Tools (Authenticated)
+
+- `GET /tools` lists registered tool definitions and argument schemas.
+- `POST /tools/{tool_name}` validates arguments, invokes the Phase 3 stub, and
+  records the call in the audit trail.
+
+### Operational Status
+
+- `GET /health` is public and reports database, Ollama, and inference-queue
+  health.
+- `GET /status` requires authentication and reports version, phase, uptime,
+  enabled models, active refresh-token sessions, and queue depth.
 
 ### Audit Logging (Authenticated)
 
@@ -311,6 +335,7 @@ Query audit logs for current user.
   "logs": [
     {
       "id": 123,
+      "event_id": "event-uuid-67890",
       "timestamp": "2026-08-29T14:32:45Z",
       "user_id": 1,
       "request_id": "req-uuid-12345",
@@ -328,9 +353,12 @@ Query audit logs for current user.
       "duration_ms": 8500
     }
   ],
-  "total": 1
+  "total": 150
 }
 ```
+
+`total` is the complete number of matching events before `limit` is applied.
+Multiple audit events may share one `request_id`; each has a unique `event_id`.
 
 ## Data Classification
 
@@ -372,8 +400,17 @@ Common status codes:
 ### Running Tests
 
 ```bash
-pytest tests/ -v
+docker build --tag agent-gateway-phase3-test .
+docker run --rm \
+  --env GATEWAY_ENV=test \
+  --env GATEWAY_JWT_SECRET=phase3-test-secret-at-least-32-chars \
+  agent-gateway-phase3-test \
+  python -m pytest -q --cov=. --cov-report=term-missing
 ```
+
+The 2026-08-30 Phase 3 verification run collected 101 tests and measured 88%
+application-only coverage. The focused `auth.py` + `routes_auth.py` run measured
+95%.
 
 ### Running with hot-reload
 
@@ -406,14 +443,24 @@ docker-compose restart gateway
 
 - Algorithm: Argon2 (memory-hard, resistant to brute-force)
 - Min length: 8 characters
+- Requires upper-case, lower-case, digit, and symbol characters
 - Each password hashed differently (salt included)
 
 ### Audit Logging
 
 - All actions logged to SQLite with full context
-- RED patterns redacted before storage
+- RED patterns redacted before structured logging and storage
 - Timestamps in UTC, ISO 8601 format
-- Audit logs retained for 90 days (archival in Phase 4+)
+- Audit logs use a 90-day default retention window
+
+Run the retention/archive command manually or schedule it from cron/systemd:
+
+```bash
+docker compose exec gateway python -m audit_archive
+```
+
+It writes timestamped JSON Lines gzip files to `audit_logging.archive_path` and
+deletes only the successfully archived database events.
 
 ## Monitoring
 
@@ -421,7 +468,7 @@ docker-compose restart gateway
 
 ```bash
 curl http://localhost:8000/health
-# Response: {"status": "ok"}
+# Response includes status, database, ollama, and queue_depth
 ```
 
 ### Logs

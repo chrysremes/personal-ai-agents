@@ -4,7 +4,7 @@ SQLAlchemy ORM setup for Agent Gateway
 """
 
 import os
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 import logging
@@ -75,6 +75,7 @@ def init_db() -> None:
     
     # Create all tables
     Base.metadata.create_all(bind=engine)
+    _migrate_audit_event_schema()
     logger.info("Database tables created")
     
     # Seed model configuration
@@ -134,6 +135,85 @@ def init_db() -> None:
         db.close()
     
     logger.info("Database initialization complete")
+
+
+def _migrate_audit_event_schema() -> None:
+    """Upgrade the pre-event Phase 3 audit table without losing its records."""
+    inspector = inspect(engine)
+    if "audit_logs" not in inspector.get_table_names():
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("audit_logs")}
+    request_id_is_unique = any(
+        constraint.get("column_names") == ["request_id"]
+        for constraint in inspector.get_unique_constraints("audit_logs")
+    )
+    request_id_is_unique = request_id_is_unique or any(
+        index.get("unique") and index.get("column_names") == ["request_id"]
+        for index in inspector.get_indexes("audit_logs")
+    )
+    if "event_id" in columns and not request_id_is_unique:
+        return
+
+    logger.info("Migrating audit_logs to correlated event schema")
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS audit_logs_new"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE audit_logs_new (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    event_id VARCHAR(36) NOT NULL UNIQUE,
+                    timestamp VARCHAR(30) NOT NULL,
+                    user_id INTEGER,
+                    request_id VARCHAR(36) NOT NULL,
+                    agent VARCHAR(128),
+                    action VARCHAR(64) NOT NULL,
+                    model VARCHAR(64),
+                    data_class VARCHAR(10),
+                    data_class_patterns TEXT,
+                    approval_required BOOLEAN NOT NULL DEFAULT 0,
+                    approval_status VARCHAR(32),
+                    tokens_used TEXT,
+                    result VARCHAR(32) NOT NULL,
+                    error_message TEXT,
+                    queue_wait_ms INTEGER,
+                    duration_ms INTEGER,
+                    FOREIGN KEY(user_id) REFERENCES users (id)
+                )
+                """
+            )
+        )
+        event_expression = (
+            "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || "
+            "lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || "
+            "lower(hex(randomblob(6)))"
+        )
+        source_event = "event_id" if "event_id" in columns else event_expression
+        connection.execute(
+            text(
+                f"""
+                INSERT INTO audit_logs_new (
+                    id, event_id, timestamp, user_id, request_id, agent, action,
+                    model, data_class, data_class_patterns, approval_required,
+                    approval_status, tokens_used, result, error_message,
+                    queue_wait_ms, duration_ms
+                )
+                SELECT
+                    id, {source_event}, timestamp, user_id, request_id, agent, action,
+                    model, data_class, data_class_patterns, approval_required,
+                    approval_status, tokens_used, result, error_message,
+                    queue_wait_ms, duration_ms
+                FROM audit_logs
+                """
+            )
+        )
+        connection.execute(text("DROP TABLE audit_logs"))
+        connection.execute(text("ALTER TABLE audit_logs_new RENAME TO audit_logs"))
+        connection.execute(text("CREATE INDEX ix_audit_logs_timestamp ON audit_logs (timestamp)"))
+        connection.execute(text("CREATE INDEX ix_audit_logs_user_id ON audit_logs (user_id)"))
+        connection.execute(text("CREATE INDEX ix_audit_logs_request_id ON audit_logs (request_id)"))
+        connection.execute(text("CREATE INDEX ix_timestamp_user_id ON audit_logs (timestamp, user_id)"))
 
 
 def reset_db() -> None:

@@ -54,7 +54,7 @@ async def get_audit_logs(
     
     try:
         # Query audit logs from database
-        logs = await db_audit_logger.query_logs(
+        logs, total = await db_audit_logger.query_logs(
             user_id=user_id,  # Only their own logs
             start_time=start_time,
             end_time=end_time,
@@ -72,7 +72,7 @@ async def get_audit_logs(
         
         return AuditLogsResponse(
             logs=log_entries,
-            total=len(log_entries),  # TODO: Get actual total from query
+            total=total,
         )
     
     except Exception as e:

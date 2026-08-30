@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-29  
 **Version**: 3.0.0-rc1  
-**Status**: ~75% Complete - Ready for Testing and Hardening
+**Status**: Known Phase 3 review gaps implemented; live-host sign-off remains
 
 ## Overview
 
@@ -26,7 +26,7 @@ Agent Gateway is a FastAPI service that serves as the central routing, authentic
 - [x] Refresh token management (7-day TTL)
 - [x] POST /auth/login endpoint
 - [x] POST /auth/refresh endpoint
-- [x] POST /auth/logout endpoint (placeholder)
+- [x] POST /auth/logout endpoint with authenticated refresh-token revocation
 - [x] POST /admin/setup/user endpoint (one-time setup)
 - [x] JWT middleware for protected routes
 
@@ -135,38 +135,28 @@ GET /audit/logs?user_id=X&start_time=T1&end_time=T2&agent=A&result=R
 
 ### Partial Implementations
 
-1. **Logout Endpoint**
-   - Currently a placeholder
-   - Phase 4: Needs request context extraction for refresh token lookup
-   - Current: Just returns success message
-
-2. **Approval Cache**
+1. **Approval Cache**
    - In-memory dictionary (lost on restart)
    - Phase 4+: Should persist to database or Redis
-   - Current: 5-minute TTL in code (not enforced)
+   - Current: owner binding and five-minute expiry are enforced
 
-3. **Error Retry Logic**
+2. **Error Retry Logic**
    - Ollama retries timeouts and connection failures up to three times with
      1s, 2s, and 4s backoff; server errors retry once.
    - Each model tier supplies its own request timeout (120s / 180s / 600s).
    - The chat endpoint returns consistent retryable error payloads with a
      request ID for tracing.
 
-4. **Model Selection**
-   - Hardcoded to default tier (qwen3.5:2b)
-   - Phase 3.7: Should honor model_preference and agent hints
-   - Plan: Query model_config table for tier info
-
-5. **Audit Log Archival**
-   - Not implemented
-   - Phase 4.3: Monthly archive to gzipped CSV
-   - Current: Logs stay in SQLite indefinitely
+3. **Audit Log Scheduling**
+   - `python -m audit_archive` implements 90-day gzip archival
+   - Deployment must schedule the command with cron/systemd
 
 ### Known Issues
 
 - Swagger UI not customized (default FastAPI docs at /docs)
 - No rate limiting (all users unlimited requests)
-- No pagination for large audit log queries
+- Audit queries expose a correct total plus a bounded `limit`; cursor/offset
+  pagination is deferred
 - Ollama provider token counts are estimates (4 chars ≈ 1 token)
 - No support for streaming responses yet
 - Database file must be writable at startup
@@ -183,19 +173,21 @@ GET /audit/logs?user_id=X&start_time=T1&end_time=T2&agent=A&result=R
 **Effort**: ~2 days
 
 ### Epic 6: MCP Tool Registry
-- [ ] Tool registry design
-- [ ] GET /tools endpoint (list tools)
-- [ ] POST /tools/{tool_name} endpoint (call tools)
-- [ ] Tool argument validation
-- [ ] Tool logging to audit trail
+- [x] Tool registry design
+- [x] GET /tools endpoint (list tools)
+- [x] POST /tools/{tool_name} endpoint (call tools)
+- [x] Tool argument validation
+- [x] Tool logging to audit trail
 
 **Effort**: ~3 days
 
 ### Epic 8: Testing
-- [ ] 30+ unit tests (auth, classifier, audit)
-- [ ] 10+ integration tests (Gateway ↔ Ollama)
+- [x] 30+ authentication test cases
+- [x] 20+ classification test cases
+- [x] 10+ audit test cases
+- [x] 10+ isolated HTTP/provider integration scenarios
 - [ ] 20+ manual test scenarios (curl/Postman)
-- [ ] Coverage report >85%
+- [x] Coverage report >85% (88% application-only; focused auth 95% on 2026-08-30)
 
 **Effort**: ~5 days
 
@@ -229,7 +221,7 @@ cp .env.example .env
 docker-compose up -d
 
 # 3. Create first user
-curl -X POST http://localhost:8000/auth/admin/setup/user \
+curl -X POST http://localhost:8000/admin/setup/user \
   -H "Content-Type: application/json" \
   -d '{"username": "user", "password": "MyPassword123!"}'
 
@@ -273,9 +265,9 @@ uvicorn main:app --reload
 - **Lines of Code**: ~3000 (core + tests)
 - **Modules**: 15+ (auth, classifier, queue, providers, routes, etc.)
 - **Database Tables**: 4 (users, refresh_tokens, audit_logs, model_config)
-- **API Endpoints**: 9 (3 auth, 2 chat, 1 approve, 1 audit, 2 status)
+- **API Endpoints**: 11 documented Phase 3 endpoints
 - **Configuration Options**: 12+ (env vars + YAML)
-- **Test Cases**: 25+ (unit + resilience)
+- **Test Cases**: 101 collected (unit, security, HTTP integration, resilience)
 - **Documentation Pages**: 3 (README, DEVELOPMENT, this summary)
 
 ## Next Phase (Phase 4)

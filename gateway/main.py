@@ -4,25 +4,33 @@ Personal AI Agent Platform
 """
 
 import uuid
+from datetime import datetime, timezone
+import time
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
+from sqlalchemy import text
 
 # Initialize logging (must be before other imports that use logging)
 import logging_config
 
-from db import startup_db, shutdown_db
-from routes_auth import router as auth_router
-from routes_chat import router as chat_router
+from db import SessionLocal, engine, startup_db, shutdown_db
+from routes_auth import admin_router, router as auth_router
+from routes_chat import ollama_provider, router as chat_router
 from routes_audit import router as audit_router
+from routes_tools import router as tools_router
 from errors import error_response
+from inference_queue import get_queue_depth
+from middleware_auth import get_current_user
+from models import ModelConfig, RefreshToken
 
 # Setup logging
 logger = logging.getLogger(__name__)
+STARTED_AT = time.monotonic()
 
 
 # Lifecycle
@@ -102,8 +110,10 @@ async def handle_validation_error(
 
 # Include routers
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(chat_router)
 app.include_router(audit_router)
+app.include_router(tools_router)
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -112,8 +122,61 @@ logger = logging.getLogger(__name__)
 # Health check endpoint (no auth required)
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
-    return {"status": "ok"}
+    """Report process health plus required dependency state."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        database_status = "connected"
+    except Exception:
+        logger.exception("Database health check failed")
+        database_status = "unavailable"
+
+    ollama_status = "connected" if await ollama_provider.health_check() else "unavailable"
+    overall_status = (
+        "healthy"
+        if database_status == "connected" and ollama_status == "connected"
+        else "degraded"
+    )
+    return {
+        "status": overall_status,
+        "database": database_status,
+        "ollama": ollama_status,
+        "queue_depth": get_queue_depth(),
+    }
+
+
+@app.get("/status")
+async def gateway_status(user_id: int = Depends(get_current_user)) -> dict:
+    """Return authenticated operational status for Gateway clients."""
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    db = SessionLocal()
+    try:
+        models = [
+            row.model_name
+            for row in db.query(ModelConfig)
+            .filter(ModelConfig.enabled.is_(True))
+            .order_by(ModelConfig.id)
+            .all()
+        ]
+        active_sessions = (
+            db.query(RefreshToken)
+            .filter(
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.expires_at > now_iso,
+            )
+            .count()
+        )
+    finally:
+        db.close()
+
+    return {
+        "gateway_version": app.version,
+        "phase": 3,
+        "uptime_seconds": int(time.monotonic() - STARTED_AT),
+        "models_available": models,
+        "active_sessions": active_sessions,
+        "queue_depth": get_queue_depth(),
+    }
 
 
 # Placeholder root endpoint

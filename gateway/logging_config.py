@@ -11,6 +11,7 @@ from datetime import datetime
 import re
 
 from config import settings
+from classifier import redact_red_data
 
 
 class RedactedJSONFormatter(logging.Formatter):
@@ -60,8 +61,10 @@ class RedactedJSONFormatter(logging.Formatter):
         
         # Redact API keys, passwords, etc.
         text = self.APIKEY_PATTERN.sub(r"\1: [REDACTED]", text)
-        
-        return text
+
+        # Apply the classifier's RED rules to every structured log sink, not
+        # only audit events. This also protects provider exception messages.
+        return redact_red_data(text)
 
 
 class ContextFilter(logging.Filter):
@@ -165,39 +168,34 @@ class AuditLogger:
         # Log to stdout (JSON)
         self.logger.info(json.dumps(log_entry))
         
-        # Log to database (async, fire-and-forget)
+        # Persist before returning so audit failures are visible to the caller.
         try:
             # Import here to avoid circular imports
             from audit import log_to_database
-            
-            # Schedule database write (don't wait)
-            import asyncio
-            asyncio.create_task(
-                log_to_database(
-                    user_id=user_id,
-                    request_id=request_id,
-                    agent=agent,
-                    action=action,
-                    model=model,
-                    data_class=data_class,
-                    patterns=patterns,
-                    approval_required=approval_required,
-                    approval_status=approval_status,
-                    tokens=tokens,
-                    result=result,
-                    error=error,
-                    duration_ms=duration_ms,
-                    queue_wait_ms=queue_wait_ms,
-                )
+
+            await log_to_database(
+                user_id=user_id,
+                request_id=request_id,
+                agent=agent,
+                action=action,
+                model=model,
+                data_class=data_class,
+                patterns=patterns,
+                approval_required=approval_required,
+                approval_status=approval_status,
+                tokens=tokens,
+                result=result,
+                error=log_entry["error"],
+                duration_ms=duration_ms,
+                queue_wait_ms=queue_wait_ms,
             )
-        except Exception as e:
-            self.logger.error(f"Failed to schedule database audit log: {e}")
+        except Exception:
+            self.logger.exception("Failed to persist database audit event")
+            raise
     
     def _redact_error(self, error: str) -> str:
         """Redact RED patterns from error messages before logging"""
-        # This will be fully implemented in Issue 4.2
-        # For now, just return as-is
-        return error
+        return redact_red_data(error)
 
 
 # Global audit logger instance

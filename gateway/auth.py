@@ -90,9 +90,16 @@ class PasswordManager:
         """
         if len(password) < 8:
             raise ValueError("Password must be at least 8 characters")
-        
-        # For Phase 3, basic validation only
-        # Phase 10 can add more stringent requirements (uppercase, digits, symbols)
+
+        if not any(character.isupper() for character in password):
+            raise ValueError("Password must contain an uppercase letter")
+        if not any(character.islower() for character in password):
+            raise ValueError("Password must contain a lowercase letter")
+        if not any(character.isdigit() for character in password):
+            raise ValueError("Password must contain a digit")
+        if not any(not character.isalnum() for character in password):
+            raise ValueError("Password must contain a symbol")
+
         logger.debug("Password validation passed")
 
 

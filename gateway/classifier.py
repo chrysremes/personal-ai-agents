@@ -5,7 +5,7 @@ Based on pattern matching against configuration
 
 import logging
 import re
-from typing import List, Tuple
+from typing import Any, List, Tuple
 from enum import Enum
 
 from config import settings
@@ -74,7 +74,7 @@ class DataClassifier:
         logger.debug("Text classified as GREEN")
         return Classification(DataClass.GREEN, [])
     
-    def _compile_patterns(self, pattern_list: List[str]) -> List[Tuple[str, re.Pattern]]:
+    def _compile_patterns(self, pattern_list: List[Any]) -> List[Tuple[str, re.Pattern]]:
         """
         Compile pattern strings to regex objects
         
@@ -86,11 +86,18 @@ class DataClassifier:
         """
         compiled = []
         
-        for pattern_str in pattern_list:
+        for configured_pattern in pattern_list:
+            if isinstance(configured_pattern, dict):
+                pattern_str = configured_pattern.get("pattern", "")
+                pattern_name = configured_pattern.get("name", pattern_str)
+            else:
+                pattern_str = configured_pattern
+                pattern_name = pattern_str
+
             try:
                 # Compile with case-insensitive flag
                 compiled_pattern = re.compile(pattern_str, re.IGNORECASE)
-                compiled.append((pattern_str, compiled_pattern))
+                compiled.append((pattern_name, compiled_pattern))
             except re.error as e:
                 logger.error(f"Invalid regex pattern: {pattern_str}: {e}")
         
@@ -109,10 +116,9 @@ class DataClassifier:
         """
         matches = []
         
-        for pattern_str, regex in patterns:
+        for pattern_name, regex in patterns:
             if regex.search(text):
-                # Use pattern string as description (can be enhanced)
-                matches.append(pattern_str)
+                matches.append(pattern_name)
         
         return matches
 
@@ -137,3 +143,11 @@ def classify_data(text: str) -> Classification:
 def get_classifier() -> DataClassifier:
     """Get the global classifier instance"""
     return _classifier
+
+
+def redact_red_data(text: str) -> str:
+    """Redact values matched by the same RED rules used for classification."""
+    redacted = text
+    for pattern_name, regex in _classifier.red_patterns:
+        redacted = regex.sub(f"[REDACTED:{pattern_name}]", redacted)
+    return redacted

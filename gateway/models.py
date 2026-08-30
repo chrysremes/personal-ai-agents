@@ -4,9 +4,9 @@ Database schema definition
 """
 
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
+import uuid
 
 Base = declarative_base()
 
@@ -47,9 +47,16 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(
+        String(36),
+        unique=True,
+        nullable=False,
+        index=True,
+        default=lambda: str(uuid.uuid4()),
+    )
     timestamp = Column(String(30), nullable=False, index=True)  # ISO 8601 UTC
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # nullable for unauthenticated
-    request_id = Column(String(36), unique=True, nullable=False, index=True)  # UUID
+    request_id = Column(String(36), nullable=False, index=True)  # correlation UUID
     agent = Column(String(128), nullable=True)
     action = Column(String(64), nullable=False)  # 'request_inference', 'login', etc.
     model = Column(String(64), nullable=True)

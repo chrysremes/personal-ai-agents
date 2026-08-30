@@ -23,12 +23,14 @@ from models import User, RefreshToken
 from db import get_db
 from auth import password_manager, token_manager
 from logging_config import audit_logger
+from middleware_auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
 
 # Create router
 router = APIRouter(prefix="/auth", tags=["authentication"])
+admin_router = APIRouter(prefix="/admin", tags=["setup"])
 
 
 def get_iso_timestamp() -> str:
@@ -254,24 +256,42 @@ async def refresh(
 
 @router.post("/logout", response_model=LogoutResponse, status_code=200)
 async def logout(
-    user_id: int = None,  # Will be injected by middleware
-    refresh_token: str = None,  # Will come from request context (Phase 4)
+    user_id: int = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> LogoutResponse:
     """
     Logout user and revoke refresh token
     
-    Note: In Phase 4, this will extract refresh_token from request context
-    For Phase 3, this is a placeholder
+    Every active refresh token owned by the authenticated user is revoked. The
+    short-lived bearer token remains valid until its normal expiry.
     
     Response:
         - message: Logout confirmation message
     """
     request_id = str(uuid.uuid4())
     
-    # TODO: Phase 4 - Extract refresh_token from request context
-    logger.info(f"[{request_id}] Logout endpoint called")
-    
+    revoked_at = get_iso_timestamp()
+    revoked_count = (
+        db.query(RefreshToken)
+        .filter(
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked_at.is_(None),
+        )
+        .update({RefreshToken.revoked_at: revoked_at}, synchronize_session=False)
+    )
+    db.commit()
+
+    logger.info(
+        f"[{request_id}] Logout completed for user_id={user_id}; "
+        f"revoked_tokens={revoked_count}"
+    )
+    await audit_logger.log_action(
+        user_id=user_id,
+        request_id=request_id,
+        action="logout",
+        result="success",
+    )
+
     return LogoutResponse(message="Logged out successfully")
 
 
@@ -282,7 +302,7 @@ async def logout(
 _setup_mode_enabled = True  # Will be disabled after first user
 
 
-@router.post("/admin/setup/user", response_model=SetupUserResponse, status_code=200)
+@admin_router.post("/setup/user", response_model=SetupUserResponse, status_code=200)
 async def setup_user(
     request: SetupUserRequest,
     db: Session = Depends(get_db),

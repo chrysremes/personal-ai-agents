@@ -11,7 +11,13 @@ from datetime import datetime, timedelta, timezone
 import sys
 sys.path.insert(0, '/home/chrystian/Documents/GitRepos/personal-ai-agents/gateway')
 
-from auth import password_manager, token_manager
+import auth
+from auth import (
+    get_password_manager,
+    get_token_manager,
+    password_manager,
+    token_manager,
+)
 from classifier import classify_data, DataClass
 from inference_queue import get_inference_queue
 
@@ -58,6 +64,23 @@ class TestPasswordHashing:
         """Empty password raises error"""
         with pytest.raises(ValueError):
             password_manager.hash_password("")
+
+    def test_invalid_argon2_hash_is_rejected(self):
+        """Malformed stored hashes fail closed."""
+        assert password_manager.verify_password("SecurePassword123!", "invalid") is False
+
+    def test_argon2_hashing_failure_is_reported(self, monkeypatch):
+        """Failures from the Argon2 boundary become a stable domain error."""
+        monkeypatch.setattr(
+            auth.PasswordHasher,
+            "hash",
+            lambda _self, _password: (_ for _ in ()).throw(
+                RuntimeError("argon2 unavailable")
+            ),
+        )
+
+        with pytest.raises(ValueError, match="Password hashing failed"):
+            password_manager.hash_password("SecurePassword123!")
 
 
 class TestJWTTokens:
@@ -126,6 +149,48 @@ class TestJWTTokens:
         )
         
         assert expected_range[0] < expiry < expected_range[1]
+
+    def test_token_with_invalid_signature_is_rejected(self):
+        """A structurally valid token signed by another key fails closed."""
+        wrong_key_token = auth.jwt.encode(
+            {
+                "user_id": 42,
+                "exp": datetime.now(timezone.utc) + timedelta(minutes=1),
+            },
+            "different-signing-key-that-is-at-least-32-characters",
+            algorithm="HS256",
+        )
+
+        with pytest.raises(ValueError, match="signature"):
+            token_manager.verify_access_token(wrong_key_token)
+
+    def test_jwt_encoder_failure_is_reported(self, monkeypatch):
+        """Failures from the JWT boundary become a stable domain error."""
+        monkeypatch.setattr(
+            auth.jwt,
+            "encode",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("encoder failed")),
+        )
+
+        with pytest.raises(ValueError, match="Token creation failed"):
+            token_manager.create_access_token(42)
+
+    def test_unexpected_jwt_decoder_failure_is_reported(self, monkeypatch):
+        """Unexpected failures from the JWT boundary still fail closed."""
+        monkeypatch.setattr(
+            auth.jwt,
+            "decode",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("decoder failed")
+            ),
+        )
+
+        with pytest.raises(ValueError, match="Token verification failed"):
+            token_manager.verify_access_token("token")
+
+    def test_authentication_managers_are_available_through_public_accessors(self):
+        assert get_password_manager() is password_manager
+        assert get_token_manager() is token_manager
 
 
 # ============================================================================

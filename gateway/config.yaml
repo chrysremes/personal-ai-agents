@@ -6,36 +6,31 @@
 data_classification:
   # RED patterns - sensitive data, never sent to cloud
   red_patterns:
-    - \bCPF\b
-    - \d{3}\.\d{3}\.\d{3}-\d{2}  # CPF format XXX.XXX.XXX-XX
-    - "bank account"
-    - "account number"
-    - "IRPF"
-    - "imposto de renda"
-    - "gov.br"
-    - "banco do brasil"
-    - "itau"
-    - "santander"
-    - "caixa"
-    - "boleto"
-    - "pix"
-    - "ssn"
-    - "social security"
-    - "credit card"
-    - "visa"
-    - "mastercard"
+    - name: CPF
+      pattern: '(?<!\d)(?:\d{3}\.\d{3}\.\d{3}-\d{2}|\d{11})(?!\d)'
+    - name: Bank Account
+      pattern: '\b(?:ag[eê]ncia|conta corrente|conta|d[ií]gito|banco|bank account|account number)\b'
+    - name: Tax Records
+      pattern: '\b(?:IRPF|informe de rendimentos|imposto de renda|receitanet|Gov\.br)\b'
+    - name: Financial Transaction
+      pattern: '\b(?:transfer[eê]ncia|d[eé]bito|cr[eé]dito|extrato|saldo|boleto|pix)\b'
+    - name: CNPJ
+      pattern: '(?<!\d)\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}(?!\d)'
+    - name: RG
+      pattern: '\bRG\s*:?'
+    - name: Credentials
+      pattern: '\b(?:minha|meu|my)\s+(?:senha|c[oó]digo|pin(?:code)?|token)(?:\s+\w+){0,3}\s+(?:[eé]|is|:|=)\s*\S+'
+    - name: Identity Data
+      pattern: '\b(?:CPF|CNPJ|SSN|social security)\b'
+    - name: Payment Card
+      pattern: '\b(?:credit card|visa|mastercard)\b'
   
   # YELLOW patterns - requires approval before cloud transmission
   yellow_patterns:
-    - "confidential"
-    - "proprietary"
-    - "private"
-    - "internal"
-    - "source code"
-    - "password"
-    - "secret"
-    - "api key"
-    - "token"
+    - name: Private Code
+      pattern: '\b(?:reposit[oó]rio privado|source code|proprietary|private)\b'
+    - name: Confidential
+      pattern: '\b(?:confidential|confidencial|internal|for internal use only|business secret|secret)\b'
 
 # Server Configuration
 server:
@@ -61,6 +56,10 @@ ollama:
   base_url: http://ollama:11434
   timeout_seconds: 30
   max_retries: 3
+
+audit_logging:
+  retention_days: 90
+  archive_path: /data/ai-platform/backups/audit-logs
 
 # Model Tiers (reference, overridden by database ModelConfig table)
 models:

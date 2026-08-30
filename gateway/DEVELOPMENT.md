@@ -165,21 +165,34 @@ await audit_logger.log_action(
 
 ### Unit Tests
 
-Tests are in `tests/test_core.py`. Run with:
+Tests are in `tests/test_*.py`. Run with:
 
 ```bash
 pytest tests/ -v
 ```
 
-### Integration Tests (TODO)
+For the measured coverage gate:
 
-End-to-end tests for Gateway ↔ Ollama flow. Will be added in Epic 8.4.
+```bash
+pytest tests/ -q --cov=. --cov-report=term-missing
+```
+
+The 2026-08-30 verification run collected 101 tests with 88% application-only
+coverage. `.coveragerc` excludes test code from that measurement; the focused
+authentication modules measured 95%.
+
+### Integration Tests
+
+HTTP flow tests use FastAPI's test client and mock only system boundaries such
+as Ollama and Claude. Provider resilience tests cover timeouts, refused
+connections, retry limits, and model-specific timeouts. A live Ollama smoke
+test remains part of host sign-off because it depends on the Phase 2 service.
 
 ### Manual Testing with curl
 
 ```bash
 # Create user
-curl -X POST http://localhost:8000/auth/admin/setup/user \
+curl -X POST http://localhost:8000/admin/setup/user \
   -H "Content-Type: application/json" \
   -d '{"username": "testuser", "password": "TestPassword123!"}'
 
@@ -195,6 +208,20 @@ curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"prompt": "Hello, what is your name?"}'
 ```
+
+### Archiving expired audit events
+
+The archive command uses `audit_logging.retention_days` and
+`audit_logging.archive_path` from `config.yaml` unless overridden by the
+corresponding environment settings:
+
+```bash
+python -m audit_archive
+```
+
+Schedule that command with cron/systemd for unattended retention. Each run
+writes a timestamped `.jsonl.gz` archive atomically before deleting the archived
+rows from SQLite.
 
 ## Database
 
@@ -313,10 +340,11 @@ isort *.py
 
 - [ ] Logout endpoint: Needs Phase 4 request context integration
 - [ ] Approval cache: Currently in-memory (no persistence)
-- [ ] Retry logic: Not yet implemented for providers
-- [ ] Error responses: Need more descriptive messages
-- [ ] Test suite: Need 30+ unit tests for >85% coverage
-- [ ] Integration tests: Need E2E flow testing
+- [x] Retry logic: transient Ollama failures use bounded backoff
+- [x] Error responses: stable envelopes include request IDs and retry guidance
+- [x] Automated suite: 101 tests, 88% application-only coverage (2026-08-30)
+- [ ] Live-host Ollama smoke and performance sign-off
+- [x] Isolated HTTP/provider integration flows
 
 ### Phase 4+
 

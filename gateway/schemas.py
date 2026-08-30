@@ -2,7 +2,7 @@
 Pydantic schemas for API requests/responses
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict, Any
 from enum import Enum
 
@@ -12,7 +12,12 @@ from enum import Enum
 # ============================================================================
 
 class LoginRequest(BaseModel):
-    username: str = Field(..., min_length=3, max_length=32)
+    username: str = Field(
+        ...,
+        min_length=3,
+        max_length=32,
+        pattern=r"^[A-Za-z0-9]+$",
+    )
     password: str = Field(..., min_length=8)
 
 
@@ -35,7 +40,12 @@ class LogoutResponse(BaseModel):
 
 
 class SetupUserRequest(BaseModel):
-    username: str = Field(..., min_length=3, max_length=32)
+    username: str = Field(
+        ...,
+        min_length=3,
+        max_length=32,
+        pattern=r"^[A-Za-z0-9]+$",
+    )
     password: str = Field(..., min_length=8)
 
 
@@ -56,6 +66,8 @@ class DataClassification(str, Enum):
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     prompt: str = Field(..., min_length=1)
     model_preference: Optional[str] = None
     agent: Optional[str] = None
@@ -68,6 +80,8 @@ class TokenUsage(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     id: str
     model_used: str
     data_class: DataClassification
@@ -116,6 +130,7 @@ class AuditLogFilter(BaseModel):
 
 class AuditLogEntry(BaseModel):
     id: int
+    event_id: str
     timestamp: str
     user_id: Optional[int]
     request_id: str
