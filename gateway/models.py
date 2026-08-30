@@ -82,4 +82,4 @@ class ModelConfig(Base):
     tier = Column(String(32), nullable=True)  # 'default', 'heavier', 'batch', 'cloud'
     timeout_seconds = Column(Integer, nullable=False, default=120)
     enabled = Column(Boolean, default=True, nullable=False)
-    metadata = Column(Text, nullable=True)  # JSON blob for provider-specific config
+    metadata_json = Column("metadata", Text, nullable=True)  # Provider JSON config

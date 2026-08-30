@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator
 from pathlib import Path
 import yaml
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     
     # Ollama
     ollama_base_url: str = Field("http://ollama:11434", alias="OLLAMA_BASE_URL")
+    ollama_timeout_seconds: int = Field(120, alias="OLLAMA_TIMEOUT_SECONDS")
+    inference_timeouts_by_model: Dict[str, int] = Field(default_factory=dict)
     
     # Claude
     claude_api_key: Optional[str] = Field(None, alias="CLAUDE_API_KEY")
@@ -77,6 +79,14 @@ def load_config() -> Settings:
                 settings.yellow_patterns = data_class_config.get("yellow_patterns", [])
                 logger.debug(f"Loaded RED patterns: {len(settings.red_patterns)}")
                 logger.debug(f"Loaded YELLOW patterns: {len(settings.yellow_patterns)}")
+
+            model_timeouts = {}
+            for tier in yaml_config.get("models", {}).get("tiers", {}).values():
+                timeout_seconds = tier.get("timeout_seconds")
+                for model_name in tier.get("models", []):
+                    if timeout_seconds is not None:
+                        model_timeouts[model_name] = timeout_seconds
+            settings.inference_timeouts_by_model = model_timeouts
             
             logger.debug(f"YAML config sections: {list(yaml_config.keys())}")
         except Exception as e:
@@ -104,4 +114,3 @@ try:
 except Exception as e:
     logger.error(f"Configuration error: {e}")
     raise
-

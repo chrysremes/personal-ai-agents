@@ -25,10 +25,11 @@ from models import User, AuditLog
 from db import get_db
 from middleware_auth import get_current_user
 from classifier import classify_data
-from queue import acquire_inference_queue
+from inference_queue import acquire_inference_queue
 from providers.ollama import OllamaProvider
 from providers.claude import ClaudeProvider
 from logging_config import audit_logger
+from errors import error_response
 
 logger = logging.getLogger(__name__)
 
@@ -264,9 +265,12 @@ async def chat(
                 duration_ms=int((time.time() - request_start) * 1000),
                 queue_wait_ms=queue_wait_ms,
             )
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="Model request timed out. Please try again.",
+            return error_response(
+                status.HTTP_504_GATEWAY_TIMEOUT,
+                "timeout",
+                "Model request timed out after retries. Please try again.",
+                request_id,
+                retry_after=5,
             )
         
         except ConnectionError as e:
@@ -284,9 +288,12 @@ async def chat(
                 duration_ms=int((time.time() - request_start) * 1000),
                 queue_wait_ms=queue_wait_ms,
             )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Ollama service is unavailable. Please try again later.",
+            return error_response(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "ollama_unavailable",
+                "Ollama service is unavailable. Please try again later.",
+                request_id,
+                retry_after=5,
             )
         
         except Exception as e:
@@ -304,9 +311,11 @@ async def chat(
                 duration_ms=int((time.time() - request_start) * 1000),
                 queue_wait_ms=queue_wait_ms,
             )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="An error occurred during inference. Please try again.",
+            return error_response(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "inference_failed",
+                "An error occurred during inference. Please try again.",
+                request_id,
             )
     
     except HTTPException:
@@ -314,9 +323,11 @@ async def chat(
         raise
     except Exception as e:
         logger.error(f"[{request_id}] Unhandled exception: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred.",
+        return error_response(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "unexpected_error",
+            "An unexpected error occurred.",
+            request_id,
         )
 
 

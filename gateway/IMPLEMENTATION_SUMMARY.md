@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-29  
 **Version**: 3.0.0-rc1  
-**Status**: ~70% Complete - Ready for Testing and Hardening
+**Status**: ~75% Complete - Ready for Testing and Hardening
 
 ## Overview
 
@@ -146,9 +146,11 @@ GET /audit/logs?user_id=X&start_time=T1&end_time=T2&agent=A&result=R
    - Current: 5-minute TTL in code (not enforced)
 
 3. **Error Retry Logic**
-   - Not yet implemented in providers
-   - Plan: 3 retries with exponential backoff
-   - Phase 5: Add retry wrapper around Ollama calls
+   - Ollama retries timeouts and connection failures up to three times with
+     1s, 2s, and 4s backoff; server errors retry once.
+   - Each model tier supplies its own request timeout (120s / 180s / 600s).
+   - The chat endpoint returns consistent retryable error payloads with a
+     request ID for tracing.
 
 4. **Model Selection**
    - Hardcoded to default tier (qwen3.5:2b)
@@ -172,8 +174,9 @@ GET /audit/logs?user_id=X&start_time=T1&end_time=T2&agent=A&result=R
 ## What's Remaining
 
 ### Epic 5: Error Handling & Resilience
-- [ ] Retry logic with exponential backoff
-- [ ] Timeout handling (per model tier)
+- [x] Retry logic with exponential backoff
+- [x] Timeout handling (per model tier)
+- [x] Standard error responses with request IDs
 - [ ] Circuit breaker for unavailable services
 - [ ] Graceful degradation
 
@@ -272,7 +275,7 @@ uvicorn main:app --reload
 - **Database Tables**: 4 (users, refresh_tokens, audit_logs, model_config)
 - **API Endpoints**: 9 (3 auth, 2 chat, 1 approve, 1 audit, 2 status)
 - **Configuration Options**: 12+ (env vars + YAML)
-- **Test Cases**: 20+ (unit + fixtures)
+- **Test Cases**: 25+ (unit + resilience)
 - **Documentation Pages**: 3 (README, DEVELOPMENT, this summary)
 
 ## Next Phase (Phase 4)

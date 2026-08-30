@@ -91,7 +91,7 @@ def init_db() -> None:
                     tier="default",
                     timeout_seconds=120,
                     enabled=True,
-                    metadata='{}',
+                    metadata_json='{}',
                 ),
                 ModelConfig(
                     model_name="qwen3.5:4b",
@@ -99,7 +99,7 @@ def init_db() -> None:
                     tier="heavier",
                     timeout_seconds=180,
                     enabled=True,
-                    metadata='{}',
+                    metadata_json='{}',
                 ),
                 ModelConfig(
                     model_name="qwen3.5:9b",
@@ -107,7 +107,7 @@ def init_db() -> None:
                     tier="batch",
                     timeout_seconds=600,
                     enabled=True,
-                    metadata='{}',
+                    metadata_json='{}',
                 ),
                 ModelConfig(
                     model_name="claude-code",
@@ -115,7 +115,7 @@ def init_db() -> None:
                     tier="cloud",
                     timeout_seconds=120,
                     enabled=True,
-                    metadata='{"api_endpoint": "https://api.anthropic.com/v1/messages"}',
+                    metadata_json='{"api_endpoint": "https://api.anthropic.com/v1/messages"}',
                 ),
             ]
             

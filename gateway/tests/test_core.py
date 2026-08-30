@@ -13,7 +13,7 @@ sys.path.insert(0, '/home/chrystian/Documents/GitRepos/personal-ai-agents/gatewa
 
 from auth import password_manager, token_manager
 from classifier import classify_data, DataClass
-from queue import get_inference_queue
+from inference_queue import get_inference_queue
 
 
 # ============================================================================
