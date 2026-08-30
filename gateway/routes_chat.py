@@ -422,7 +422,8 @@ async def _enforce_approval_policy(
         )
 
 
-@router.post("/", response_model=ChatResponse, status_code=200)
+@router.post("/", response_model=ChatResponse, status_code=200, include_in_schema=False)
+@router.post("", response_model=ChatResponse, status_code=200)
 async def chat(
     request: ChatRequest,
     user_id: int = Depends(get_current_user),

@@ -202,6 +202,31 @@ def test_unknown_claude_named_model_cannot_bypass_routing_policy(client: TestCli
     assert response.json()["error"]["code"] == "invalid_model"
 
 
+def test_chat_is_exposed_at_the_specified_public_url_without_redirect(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokens = create_login(client)
+    generate = AsyncMock(
+        return_value={
+            "response": "local response",
+            "tokens_used": {"input": 1, "output": 2},
+            "duration_ms": 3,
+        }
+    )
+    monkeypatch.setattr(routes_chat.ollama_provider, "generate", generate)
+
+    response = client.post(
+        "/chat",
+        headers=auth_header(tokens),
+        json={"prompt": "Summarize public AI news"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "local response"
+
+
 def test_approved_yellow_request_executes_the_cached_cloud_call(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
