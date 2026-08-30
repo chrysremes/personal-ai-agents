@@ -1,7 +1,9 @@
 """End-to-end HTTP acceptance tests for the Phase 3 gateway flows."""
 
 from datetime import datetime, timedelta, timezone
+import time
 from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +11,7 @@ from fastapi.testclient import TestClient
 from auth import password_manager
 from db import SessionLocal, reset_db
 from main import app
-from models import RefreshToken, User
+from models import AuditLog, RefreshToken, User
 import routes_chat
 
 
@@ -232,6 +234,41 @@ def test_approved_yellow_request_executes_the_cached_cloud_call(
     generate.assert_awaited_once()
 
 
+def test_green_chat_crosses_the_ollama_http_boundary_and_is_audited(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tokens = create_login(client)
+    provider_response = MagicMock()
+    provider_response.raise_for_status.return_value = None
+    provider_response.json.return_value = {
+        "response": "local response",
+        "prompt_eval_count": 3,
+        "eval_count": 4,
+    }
+    post = AsyncMock(return_value=provider_response)
+    monkeypatch.setattr(routes_chat.ollama_provider.client, "post", post)
+
+    response = client.post(
+        "/chat/",
+        headers=auth_header(tokens),
+        json={"prompt": "Summarize public AI news"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "local response"
+    assert post.await_args.args[0] == "/api/generate"
+    db = SessionLocal()
+    event = (
+        db.query(AuditLog)
+        .filter(AuditLog.request_id == response.json()["id"])
+        .one()
+    )
+    db.close()
+    assert event.action == "chat_success"
+    assert event.result == "success"
+
+
 def test_approved_red_request_is_forced_to_a_local_model(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -307,3 +344,38 @@ def test_approval_cache_enforces_owner_and_five_minute_expiry(
 
     assert wrong_owner.status_code == 404
     assert expired.status_code == 410
+
+
+def test_pending_prompt_is_purged_and_expiry_is_audited_without_approval_access(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(routes_chat, "APPROVAL_TTL", timedelta(milliseconds=20))
+    tokens = create_login(client)
+    pending = client.post(
+        "/chat/",
+        headers=auth_header(tokens),
+        json={"prompt": "confidential draft", "model_preference": "claude-code"},
+    )
+    request_id = pending.json()["id"]
+
+    time.sleep(0.05)
+    expired = client.post(
+        "/chat/approve",
+        headers=auth_header(tokens),
+        json={"request_id": request_id, "approved": True},
+    )
+
+    assert request_id not in routes_chat._approval_cache
+    assert expired.status_code == 410
+    db = SessionLocal()
+    expiry_event = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.request_id == request_id,
+            AuditLog.approval_status == "expired",
+        )
+        .one()
+    )
+    db.close()
+    assert expiry_event.result == "expired"

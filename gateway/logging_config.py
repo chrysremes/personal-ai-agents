@@ -11,7 +11,7 @@ from datetime import datetime
 import re
 
 from config import settings
-from classifier import redact_red_data
+from classifier import redact_red_data, redact_sensitive_value
 
 
 class RedactedJSONFormatter(logging.Formatter):
@@ -124,74 +124,54 @@ class AuditLogger:
     Writes to both stdout (JSON) and SQLite database
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger("gateway.audit")
     
     async def log_action(
         self,
-        user_id: int = None,
-        request_id: str = None,
-        agent: str = None,
-        action: str = None,
-        model: str = None,
-        data_class: str = None,
-        patterns: list = None,
+        user_id: int | None = None,
+        request_id: str | None = None,
+        agent: str | None = None,
+        action: str | None = None,
+        model: str | None = None,
+        data_class: str | None = None,
+        patterns: list[str] | None = None,
         approval_required: bool = False,
-        approval_status: str = None,
-        tokens: dict = None,
-        result: str = None,
-        error: str = None,
+        approval_status: str | None = None,
+        tokens: dict[str, int] | None = None,
+        tool_arguments: dict[str, Any] | None = None,
+        tool_result: Any = None,
+        result: str = "unknown",
+        error: str | None = None,
         duration_ms: int = 0,
         queue_wait_ms: int = 0,
     ) -> None:
-        """
-        Log action to audit trail
-        Writes to both JSON logs (stdout) and SQLite database
-        """
-        log_entry = {
-            "user_id": user_id,
-            "request_id": request_id,
-            "agent": agent,
-            "action": action,
-            "model": model,
-            "data_class": data_class,
-            "patterns": patterns or [],
-            "approval_required": approval_required,
-            "approval_status": approval_status,
-            "tokens": tokens,
-            "result": result,
-            "error": self._redact_error(error) if error else None,
-            "duration_ms": duration_ms,
-            "queue_wait_ms": queue_wait_ms,
-        }
-        
-        # Log to stdout (JSON)
-        self.logger.info(json.dumps(log_entry))
-        
-        # Persist before returning so audit failures are visible to the caller.
+        """Write one redacted event to structured output and SQLite."""
+        event = {key: value for key, value in locals().items() if key != "self"}
+        self.logger.info(json.dumps(self._redacted_event(event)))
+        await self._persist(event)
+
+    async def _persist(self, event: dict[str, Any]) -> None:
+        """Persist an event and surface failures to the initiating request."""
         try:
-            # Import here to avoid circular imports
             from audit import log_to_database
 
-            await log_to_database(
-                user_id=user_id,
-                request_id=request_id,
-                agent=agent,
-                action=action,
-                model=model,
-                data_class=data_class,
-                patterns=patterns,
-                approval_required=approval_required,
-                approval_status=approval_status,
-                tokens=tokens,
-                result=result,
-                error=log_entry["error"],
-                duration_ms=duration_ms,
-                queue_wait_ms=queue_wait_ms,
-            )
+            await log_to_database(**event)
         except Exception:
             self.logger.exception("Failed to persist database audit event")
             raise
+
+    def _redacted_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Return the structured-log form without mutating persistence input."""
+        redacted = dict(event)
+        redacted["patterns"] = redacted["patterns"] or []
+        redacted["tool_arguments"] = redact_sensitive_value(
+            redacted["tool_arguments"]
+        )
+        redacted["tool_result"] = redact_sensitive_value(redacted["tool_result"])
+        if redacted["error"]:
+            redacted["error"] = self._redact_error(redacted["error"])
+        return redacted
     
     def _redact_error(self, error: str) -> str:
         """Redact RED patterns from error messages before logging"""

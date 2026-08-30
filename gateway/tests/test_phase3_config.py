@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from config import load_config
 
 
@@ -37,7 +39,7 @@ models:
 
 def test_yaml_configures_all_documented_runtime_sections(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Server, database, auth, Ollama, and audit values load from YAML."""
     config_path = tmp_path / "config.yaml"
@@ -64,7 +66,7 @@ def test_yaml_configures_all_documented_runtime_sections(
 
 def test_environment_values_override_yaml(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Deployment environment values take precedence over YAML defaults."""
     config_path = tmp_path / "config.yaml"

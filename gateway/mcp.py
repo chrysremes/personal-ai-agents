@@ -18,6 +18,7 @@ class Tool:
     handler: ToolHandler
 
     def public_definition(self) -> dict[str, Any]:
+        """Return the serializable definition exposed by GET /tools."""
         return {
             "name": self.name,
             "description": self.description,
@@ -38,6 +39,7 @@ class ToolRegistry:
     }
 
     def __init__(self) -> None:
+        """Create an empty registry."""
         self._tools: dict[str, Tool] = {}
 
     def register(
@@ -47,6 +49,7 @@ class ToolRegistry:
         arguments: dict[str, dict[str, Any]],
         handler: ToolHandler,
     ) -> Tool:
+        """Register one uniquely named tool."""
         if name in self._tools:
             raise ValueError(f"Tool already registered: {name}")
         tool = Tool(name, description, arguments, handler)
@@ -54,12 +57,15 @@ class ToolRegistry:
         return tool
 
     def get(self, name: str) -> Optional[Tool]:
+        """Return a registered tool by name."""
         return self._tools.get(name)
 
     def list_definitions(self) -> list[dict[str, Any]]:
+        """Return public definitions sorted by tool name."""
         return [self._tools[name].public_definition() for name in sorted(self._tools)]
 
     def validate(self, tool: Tool, arguments: dict[str, Any]) -> None:
+        """Validate arguments against a registered tool definition."""
         unknown = sorted(set(arguments) - set(tool.arguments))
         if unknown:
             raise ValueError(f"Unknown argument: {unknown[0]}")
@@ -79,6 +85,7 @@ class ToolRegistry:
                 raise ValueError(f"Argument {name} must be a {schema.get('type')}")
 
     async def call(self, name: str, arguments: dict[str, Any]) -> Any:
+        """Validate and invoke a synchronous or asynchronous tool."""
         tool = self.get(name)
         if tool is None:
             raise KeyError(name)
@@ -103,10 +110,12 @@ def register_tool(
 
 
 async def _list_events_stub(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Return an empty calendar result for Phase 3 integration tests."""
     return {"events": [], "date_range": arguments["date_range"], "stub": True}
 
 
 async def _create_event_stub(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Return a non-mutating event preview for Phase 3."""
     return {"event": arguments, "created": False, "stub": True}
 
 

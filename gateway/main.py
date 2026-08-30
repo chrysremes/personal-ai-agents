@@ -6,6 +6,7 @@ Personal AI Agent Platform
 import uuid
 from datetime import datetime, timezone
 import time
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -121,7 +122,7 @@ logger = logging.getLogger(__name__)
 
 # Health check endpoint (no auth required)
 @app.get("/health")
-async def health():
+async def health() -> dict[str, Any]:
     """Report process health plus required dependency state."""
     try:
         with engine.connect() as connection:

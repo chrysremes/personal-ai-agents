@@ -1,5 +1,6 @@
 """Acceptance tests for MCP tool and operational status endpoints."""
 
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -71,6 +72,31 @@ def test_registered_stub_tool_validates_calls_and_is_audited(
     event = db.query(AuditLog).filter(AuditLog.action == "request_tool").one()
     db.close()
     assert event.result == "success"
+    assert json.loads(event.tool_arguments) == {"date_range": "next 7 days"}
+    assert json.loads(event.tool_result) == {
+        "events": [],
+        "date_range": "next 7 days",
+        "stub": True,
+    }
+
+
+def test_tool_audit_redacts_sensitive_argument_and_result_values(
+    authenticated_client: tuple[TestClient, dict[str, str]],
+) -> None:
+    client, headers = authenticated_client
+
+    response = client.post(
+        "/tools/google_calendar.list_events",
+        headers=headers,
+        json={"arguments": {"date_range": "CPF 123.456.789-10"}},
+    )
+
+    assert response.status_code == 200
+    db = SessionLocal()
+    event = db.query(AuditLog).filter(AuditLog.action == "request_tool").one()
+    db.close()
+    assert "123.456.789-10" not in event.tool_arguments
+    assert "123.456.789-10" not in event.tool_result
 
 
 @pytest.mark.parametrize(

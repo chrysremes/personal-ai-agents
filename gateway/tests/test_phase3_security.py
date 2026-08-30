@@ -55,6 +55,8 @@ def test_required_sensitive_categories_are_red(
         ("Acesso ao Gov.br falhou", DataClass.RED, "Tax Records"),
         ("The VISA card was declined", DataClass.RED, "Payment Card"),
         ("My social security record", DataClass.RED, "Identity Data"),
+        ("My API key is abc123", DataClass.RED, "Authentication Secret"),
+        ("Patient diagnosis HIV positive", DataClass.RED, "Sensitive Medical"),
         ("Este é um repositório privado", DataClass.YELLOW, "Private Code"),
         ("Internal planning notes", DataClass.YELLOW, "Confidential"),
     ],

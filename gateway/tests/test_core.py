@@ -65,11 +65,14 @@ class TestPasswordHashing:
         with pytest.raises(ValueError):
             password_manager.hash_password("")
 
-    def test_invalid_argon2_hash_is_rejected(self):
+    def test_invalid_argon2_hash_is_rejected(self) -> None:
         """Malformed stored hashes fail closed."""
         assert password_manager.verify_password("SecurePassword123!", "invalid") is False
 
-    def test_argon2_hashing_failure_is_reported(self, monkeypatch):
+    def test_argon2_hashing_failure_is_reported(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Failures from the Argon2 boundary become a stable domain error."""
         monkeypatch.setattr(
             auth.PasswordHasher,
@@ -150,7 +153,7 @@ class TestJWTTokens:
         
         assert expected_range[0] < expiry < expected_range[1]
 
-    def test_token_with_invalid_signature_is_rejected(self):
+    def test_token_with_invalid_signature_is_rejected(self) -> None:
         """A structurally valid token signed by another key fails closed."""
         wrong_key_token = auth.jwt.encode(
             {
@@ -164,7 +167,10 @@ class TestJWTTokens:
         with pytest.raises(ValueError, match="signature"):
             token_manager.verify_access_token(wrong_key_token)
 
-    def test_jwt_encoder_failure_is_reported(self, monkeypatch):
+    def test_jwt_encoder_failure_is_reported(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Failures from the JWT boundary become a stable domain error."""
         monkeypatch.setattr(
             auth.jwt,
@@ -175,7 +181,10 @@ class TestJWTTokens:
         with pytest.raises(ValueError, match="Token creation failed"):
             token_manager.create_access_token(42)
 
-    def test_unexpected_jwt_decoder_failure_is_reported(self, monkeypatch):
+    def test_unexpected_jwt_decoder_failure_is_reported(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Unexpected failures from the JWT boundary still fail closed."""
         monkeypatch.setattr(
             auth.jwt,
@@ -188,7 +197,9 @@ class TestJWTTokens:
         with pytest.raises(ValueError, match="Token verification failed"):
             token_manager.verify_access_token("token")
 
-    def test_authentication_managers_are_available_through_public_accessors(self):
+    def test_authentication_managers_are_available_through_public_accessors(
+        self,
+    ) -> None:
         assert get_password_manager() is password_manager
         assert get_token_manager() is token_manager
 

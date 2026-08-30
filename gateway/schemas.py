@@ -142,6 +142,8 @@ class AuditLogEntry(BaseModel):
     approval_required: bool
     approval_status: Optional[str]
     tokens_used: Optional[Dict[str, int]]
+    tool_arguments: Optional[Dict[str, Any]]
+    tool_result: Optional[Any]
     result: str
     error_message: Optional[str]
     queue_wait_ms: Optional[int]

@@ -20,6 +20,10 @@ data_classification:
       pattern: '\bRG\s*:?'
     - name: Credentials
       pattern: '\b(?:minha|meu|my)\s+(?:senha|c[oó]digo|pin(?:code)?|token)(?:\s+\w+){0,3}\s+(?:[eé]|is|:|=)\s*\S+'
+    - name: Authentication Secret
+      pattern: '\b(?:minha|meu|my)\s+(?:api[_ -]?key|chave de api|access token|token de acesso|authentication secret)(?:\s+\w+){0,3}\s+(?:[eé]|is|:|=)\s*\S+'
+    - name: Sensitive Medical
+      pattern: '\b(?:diagn[oó]stico|prontu[aá]rio|patient diagnosis|medical record|HIV|AIDS|c[aâ]ncer|cancer)\b'
     - name: Identity Data
       pattern: '\b(?:CPF|CNPJ|SSN|social security)\b'
     - name: Payment Card

@@ -65,6 +65,8 @@ class AuditLog(Base):
     approval_required = Column(Boolean, default=False, nullable=False)
     approval_status = Column(String(32), nullable=True)  # 'auto_approved', 'user_approved', etc.
     tokens_used = Column(Text, nullable=True)  # JSON: {"input": N, "output": M}
+    tool_arguments = Column(Text, nullable=True)  # redacted JSON object
+    tool_result = Column(Text, nullable=True)  # redacted JSON value
     result = Column(String(32), nullable=False)  # 'success', 'error', 'timeout', etc.
     error_message = Column(Text, nullable=True)  # with RED patterns redacted
     queue_wait_ms = Column(Integer, nullable=True)

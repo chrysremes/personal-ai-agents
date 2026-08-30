@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import uuid
 
 from db import SessionLocal
-from classifier import redact_red_data
+from classifier import redact_red_data, redact_sensitive_value
 from models import AuditLog
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,10 @@ def audit_entry_to_dict(entry: AuditLog) -> dict[str, Any]:
         "approval_required": entry.approval_required,
         "approval_status": entry.approval_status,
         "tokens_used": json.loads(entry.tokens_used) if entry.tokens_used else None,
+        "tool_arguments": (
+            json.loads(entry.tool_arguments) if entry.tool_arguments else None
+        ),
+        "tool_result": json.loads(entry.tool_result) if entry.tool_result else None,
         "result": entry.result,
         "error_message": entry.error_message,
         "queue_wait_ms": entry.queue_wait_ms,
@@ -53,32 +57,18 @@ class DatabaseAuditLogger:
         approval_required: bool = False,
         approval_status: Optional[str] = None,
         tokens: Optional[Dict[str, int]] = None,
+        tool_arguments: Optional[Dict[str, Any]] = None,
+        tool_result: Any = None,
         result: str = "unknown",
         error: Optional[str] = None,
         duration_ms: int = 0,
         queue_wait_ms: Optional[int] = None,
     ) -> None:
         """Persist one unique event under a reusable request correlation ID."""
+        event = {key: value for key, value in locals().items() if key != "self"}
         db = SessionLocal()
         try:
-            log_entry = AuditLog(
-                event_id=str(uuid.uuid4()),
-                timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                user_id=user_id,
-                request_id=request_id or str(uuid.uuid4()),
-                agent=agent,
-                action=action or "unknown",
-                model=model,
-                data_class=data_class,
-                data_class_patterns=json.dumps(patterns) if patterns else None,
-                approval_required=approval_required,
-                approval_status=approval_status,
-                tokens_used=json.dumps(tokens) if tokens else None,
-                result=result,
-                error_message=self._redact_error(error) if error else None,
-                queue_wait_ms=queue_wait_ms,
-                duration_ms=duration_ms,
-            )
+            log_entry = self._new_entry(event)
             db.add(log_entry)
             db.commit()
             logger.debug(
@@ -93,6 +83,38 @@ class DatabaseAuditLogger:
             raise
         finally:
             db.close()
+
+    def _new_entry(self, event: dict[str, Any]) -> AuditLog:
+        """Build a redacted ORM event from the logger's public arguments."""
+        return AuditLog(
+            event_id=str(uuid.uuid4()),
+            timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            user_id=event["user_id"],
+            request_id=event["request_id"] or str(uuid.uuid4()),
+            agent=event["agent"],
+            action=event["action"] or "unknown",
+            model=event["model"],
+            data_class=event["data_class"],
+            data_class_patterns=(
+                json.dumps(event["patterns"]) if event["patterns"] else None
+            ),
+            approval_required=event["approval_required"],
+            approval_status=event["approval_status"],
+            tokens_used=json.dumps(event["tokens"]) if event["tokens"] else None,
+            tool_arguments=self._json_redacted(event["tool_arguments"]),
+            tool_result=self._json_redacted(event["tool_result"]),
+            result=event["result"],
+            error_message=self._redact_error(event["error"]) if event["error"] else None,
+            queue_wait_ms=event["queue_wait_ms"],
+            duration_ms=event["duration_ms"],
+        )
+
+    @staticmethod
+    def _json_redacted(value: Any) -> Optional[str]:
+        """Serialize a present JSON value after recursive RED redaction."""
+        if value is None:
+            return None
+        return json.dumps(redact_sensitive_value(value))
 
     def _redact_error(self, error: str) -> str:
         """Apply the classifier's configured RED rules before persistence."""

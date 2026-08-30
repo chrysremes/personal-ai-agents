@@ -7,11 +7,8 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
-from sqlalchemy.orm import Session
-
 from schemas import AuditLogFilter, AuditLogEntry, AuditLogsResponse
 from middleware_auth import get_current_user
-from db import get_db
 from audit import db_audit_logger
 
 logger = logging.getLogger(__name__)
@@ -28,25 +25,8 @@ async def get_audit_logs(
     agent: Optional[str] = Query(None, description="Filter by agent name"),
     result: Optional[str] = Query(None, description="Filter by result"),
     limit: int = Query(100, ge=1, le=1000, description="Max results to return"),
-    db: Session = Depends(get_db),
 ) -> AuditLogsResponse:
-    """
-    Query audit logs for current user
-    
-    Users can only see their own audit logs.
-    Admins can see all logs (Phase 4+).
-    
-    Query Parameters:
-        - start_time: ISO 8601 start time (optional)
-        - end_time: ISO 8601 end time (optional)
-        - agent: Filter by agent name (optional)
-        - result: Filter by result ("success", "error", etc.) (optional)
-        - limit: Max results (default 100, max 1000)
-    
-    Response:
-        - logs: List of audit log entries
-        - total: Total number of matching logs (approximate)
-    """
+    """Query a limited page and exact total for the current user's events."""
     logger.info(
         f"Audit log query from user_id={user_id}, "
         f"start={start_time}, end={end_time}, agent={agent}, result={result}"

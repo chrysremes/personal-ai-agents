@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 class ServerYaml(BaseModel):
+    """Server defaults loaded from YAML."""
+
     environment: str = "development"
     host: str = "0.0.0.0"
     port: int = 8000
@@ -21,16 +23,22 @@ class ServerYaml(BaseModel):
 
 
 class DatabaseYaml(BaseModel):
+    """Database defaults loaded from YAML."""
+
     path: str = "/data/ai-platform/gateway.db"
 
 
 class AuthYaml(BaseModel):
+    """Authentication defaults loaded from YAML."""
+
     jwt_expiry_minutes: int = 15
     refresh_token_expiry_days: int = 7
     password_min_length: int = 8
 
 
 class OllamaYaml(BaseModel):
+    """Ollama defaults loaded from YAML."""
+
     base_url: str = "http://ollama:11434"
     timeout_seconds: int = 120
     max_retries: int = 3
@@ -38,22 +46,30 @@ class OllamaYaml(BaseModel):
 
 
 class ModelTierYaml(BaseModel):
+    """One model tier and its optional timeout."""
+
     models: list[str] = Field(default_factory=list)
     timeout_seconds: Optional[int] = None
 
 
 class ModelsYaml(BaseModel):
+    """Model routing and queue defaults loaded from YAML."""
+
     default_tier: str = "default"
     inference_queue_size: int = 1
     tiers: dict[str, ModelTierYaml] = Field(default_factory=dict)
 
 
 class ClassificationYaml(BaseModel):
+    """Named RED and YELLOW pattern definitions."""
+
     red_patterns: list[Any] = Field(default_factory=list)
     yellow_patterns: list[Any] = Field(default_factory=list)
 
 
 class AuditYaml(BaseModel):
+    """Audit retention and archive defaults loaded from YAML."""
+
     retention_days: int = 90
     archive_path: str = "/data/ai-platform/backups/audit-logs"
 

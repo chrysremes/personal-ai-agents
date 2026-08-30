@@ -5,10 +5,11 @@ SQLAlchemy ORM setup for Agent Gateway
 
 import os
 from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 import logging
-from typing import Generator
+from typing import Any, Generator
 
 from models import Base, User, RefreshToken, AuditLog, ModelConfig
 from config import settings
@@ -70,71 +71,72 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    """Initialize database - create all tables and seed data"""
+    """Create tables, apply lightweight migrations, and seed model data."""
     logger.info("Initializing database...")
-    
-    # Create all tables
     Base.metadata.create_all(bind=engine)
     _migrate_audit_event_schema()
+    _add_missing_audit_tool_columns()
     logger.info("Database tables created")
-    
-    # Seed model configuration
+    _seed_model_config()
+    logger.info("Database initialization complete")
+
+
+def _initial_models() -> list[ModelConfig]:
+    """Return the Phase 3 model records seeded into a new database."""
+    return [
+        ModelConfig(
+            model_name="qwen3.5:2b",
+            provider="ollama",
+            tier="default",
+            timeout_seconds=120,
+            enabled=True,
+            metadata_json="{}",
+        ),
+        ModelConfig(
+            model_name="qwen3.5:4b",
+            provider="ollama",
+            tier="heavier",
+            timeout_seconds=180,
+            enabled=True,
+            metadata_json="{}",
+        ),
+        ModelConfig(
+            model_name="qwen3.5:9b",
+            provider="ollama",
+            tier="batch",
+            timeout_seconds=600,
+            enabled=True,
+            metadata_json="{}",
+        ),
+        ModelConfig(
+            model_name="claude-code",
+            provider="claude",
+            tier="cloud",
+            timeout_seconds=120,
+            enabled=True,
+            metadata_json='{"api_endpoint": "https://api.anthropic.com/v1/messages"}',
+        ),
+    ]
+
+
+def _seed_model_config() -> None:
+    """Seed model configuration once and surface database failures."""
     db = SessionLocal()
     try:
-        # Check if models already exist
-        if db.query(ModelConfig).count() == 0:
-            logger.info("Seeding model configuration...")
-            
-            models = [
-                ModelConfig(
-                    model_name="qwen3.5:2b",
-                    provider="ollama",
-                    tier="default",
-                    timeout_seconds=120,
-                    enabled=True,
-                    metadata_json='{}',
-                ),
-                ModelConfig(
-                    model_name="qwen3.5:4b",
-                    provider="ollama",
-                    tier="heavier",
-                    timeout_seconds=180,
-                    enabled=True,
-                    metadata_json='{}',
-                ),
-                ModelConfig(
-                    model_name="qwen3.5:9b",
-                    provider="ollama",
-                    tier="batch",
-                    timeout_seconds=600,
-                    enabled=True,
-                    metadata_json='{}',
-                ),
-                ModelConfig(
-                    model_name="claude-code",
-                    provider="claude",
-                    tier="cloud",
-                    timeout_seconds=120,
-                    enabled=True,
-                    metadata_json='{"api_endpoint": "https://api.anthropic.com/v1/messages"}',
-                ),
-            ]
-            
-            for model in models:
-                db.add(model)
-            
-            db.commit()
-            logger.info(f"Seeded {len(models)} models")
-        else:
+        if db.query(ModelConfig).count() != 0:
             logger.info("Models already seeded")
-    except Exception as e:
-        logger.error(f"Error seeding models: {e}")
+            return
+        logger.info("Seeding model configuration...")
+        models = _initial_models()
+        db.add_all(models)
+        db.commit()
+        logger.info("Seeded %s models", len(models))
+    except Exception:
         db.rollback()
+        logger.exception("Error seeding models")
         raise
     finally:
         db.close()
-    
-    logger.info("Database initialization complete")
 
 
 def _migrate_audit_event_schema() -> None:
@@ -142,8 +144,21 @@ def _migrate_audit_event_schema() -> None:
     inspector = inspect(engine)
     if "audit_logs" not in inspector.get_table_names():
         return
-
     columns = {column["name"] for column in inspector.get_columns("audit_logs")}
+    if not _audit_event_migration_needed(inspector, columns):
+        return
+    logger.info("Migrating audit_logs to correlated event schema")
+    with engine.begin() as connection:
+        _create_replacement_audit_table(connection)
+        _copy_audit_rows(connection, columns)
+        _replace_audit_table(connection)
+
+
+def _audit_event_migration_needed(
+    inspector: Any,
+    columns: set[str],
+) -> bool:
+    """Return whether request IDs are still unique or event IDs are absent."""
     request_id_is_unique = any(
         constraint.get("column_names") == ["request_id"]
         for constraint in inspector.get_unique_constraints("audit_logs")
@@ -152,68 +167,90 @@ def _migrate_audit_event_schema() -> None:
         index.get("unique") and index.get("column_names") == ["request_id"]
         for index in inspector.get_indexes("audit_logs")
     )
-    if "event_id" in columns and not request_id_is_unique:
-        return
+    return "event_id" not in columns or request_id_is_unique
 
-    logger.info("Migrating audit_logs to correlated event schema")
+
+def _create_replacement_audit_table(connection: Connection) -> None:
+    """Create the correlated audit-event table used during migration."""
+    connection.execute(text("DROP TABLE IF EXISTS audit_logs_new"))
+    connection.execute(text("""
+        CREATE TABLE audit_logs_new (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            event_id VARCHAR(36) NOT NULL UNIQUE,
+            timestamp VARCHAR(30) NOT NULL,
+            user_id INTEGER,
+            request_id VARCHAR(36) NOT NULL,
+            agent VARCHAR(128),
+            action VARCHAR(64) NOT NULL,
+            model VARCHAR(64),
+            data_class VARCHAR(10),
+            data_class_patterns TEXT,
+            approval_required BOOLEAN NOT NULL DEFAULT 0,
+            approval_status VARCHAR(32),
+            tokens_used TEXT,
+            tool_arguments TEXT,
+            tool_result TEXT,
+            result VARCHAR(32) NOT NULL,
+            error_message TEXT,
+            queue_wait_ms INTEGER,
+            duration_ms INTEGER,
+            FOREIGN KEY(user_id) REFERENCES users (id)
+        )
+    """))
+
+
+def _copy_audit_rows(connection: Connection, columns: set[str]) -> None:
+    """Copy legacy rows while generating event IDs and nullable tool fields."""
+    generated_event = (
+        "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || "
+        "lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || "
+        "lower(hex(randomblob(6)))"
+    )
+    source_event = "event_id" if "event_id" in columns else generated_event
+    source_arguments = "tool_arguments" if "tool_arguments" in columns else "NULL"
+    source_result = "tool_result" if "tool_result" in columns else "NULL"
+    connection.execute(text(f"""
+        INSERT INTO audit_logs_new (
+            id, event_id, timestamp, user_id, request_id, agent, action,
+            model, data_class, data_class_patterns, approval_required,
+            approval_status, tokens_used, result, error_message,
+            tool_arguments, tool_result, queue_wait_ms, duration_ms
+        )
+        SELECT
+            id, {source_event}, timestamp, user_id, request_id, agent, action,
+            model, data_class, data_class_patterns, approval_required,
+            approval_status, tokens_used, result, error_message,
+            {source_arguments}, {source_result}, queue_wait_ms, duration_ms
+        FROM audit_logs
+    """))
+
+
+def _replace_audit_table(connection: Connection) -> None:
+    """Swap in the migrated table and recreate its query indexes."""
+    connection.execute(text("DROP TABLE audit_logs"))
+    connection.execute(text("ALTER TABLE audit_logs_new RENAME TO audit_logs"))
+    connection.execute(text("CREATE INDEX ix_audit_logs_timestamp ON audit_logs (timestamp)"))
+    connection.execute(text("CREATE INDEX ix_audit_logs_user_id ON audit_logs (user_id)"))
+    connection.execute(text("CREATE INDEX ix_audit_logs_request_id ON audit_logs (request_id)"))
+    connection.execute(text("CREATE INDEX ix_timestamp_user_id ON audit_logs (timestamp, user_id)"))
+
+
+def _add_missing_audit_tool_columns() -> None:
+    """Add tool payload columns to databases already using event IDs."""
+    inspector = inspect(engine)
+    if "audit_logs" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("audit_logs")}
+    missing = [
+        name for name in ("tool_arguments", "tool_result") if name not in columns
+    ]
+    if not missing:
+        return
     with engine.begin() as connection:
-        connection.execute(text("DROP TABLE IF EXISTS audit_logs_new"))
-        connection.execute(
-            text(
-                """
-                CREATE TABLE audit_logs_new (
-                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                    event_id VARCHAR(36) NOT NULL UNIQUE,
-                    timestamp VARCHAR(30) NOT NULL,
-                    user_id INTEGER,
-                    request_id VARCHAR(36) NOT NULL,
-                    agent VARCHAR(128),
-                    action VARCHAR(64) NOT NULL,
-                    model VARCHAR(64),
-                    data_class VARCHAR(10),
-                    data_class_patterns TEXT,
-                    approval_required BOOLEAN NOT NULL DEFAULT 0,
-                    approval_status VARCHAR(32),
-                    tokens_used TEXT,
-                    result VARCHAR(32) NOT NULL,
-                    error_message TEXT,
-                    queue_wait_ms INTEGER,
-                    duration_ms INTEGER,
-                    FOREIGN KEY(user_id) REFERENCES users (id)
-                )
-                """
+        for column_name in missing:
+            connection.execute(
+                text(f"ALTER TABLE audit_logs ADD COLUMN {column_name} TEXT")
             )
-        )
-        event_expression = (
-            "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || "
-            "lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || "
-            "lower(hex(randomblob(6)))"
-        )
-        source_event = "event_id" if "event_id" in columns else event_expression
-        connection.execute(
-            text(
-                f"""
-                INSERT INTO audit_logs_new (
-                    id, event_id, timestamp, user_id, request_id, agent, action,
-                    model, data_class, data_class_patterns, approval_required,
-                    approval_status, tokens_used, result, error_message,
-                    queue_wait_ms, duration_ms
-                )
-                SELECT
-                    id, {source_event}, timestamp, user_id, request_id, agent, action,
-                    model, data_class, data_class_patterns, approval_required,
-                    approval_status, tokens_used, result, error_message,
-                    queue_wait_ms, duration_ms
-                FROM audit_logs
-                """
-            )
-        )
-        connection.execute(text("DROP TABLE audit_logs"))
-        connection.execute(text("ALTER TABLE audit_logs_new RENAME TO audit_logs"))
-        connection.execute(text("CREATE INDEX ix_audit_logs_timestamp ON audit_logs (timestamp)"))
-        connection.execute(text("CREATE INDEX ix_audit_logs_user_id ON audit_logs (user_id)"))
-        connection.execute(text("CREATE INDEX ix_audit_logs_request_id ON audit_logs (request_id)"))
-        connection.execute(text("CREATE INDEX ix_timestamp_user_id ON audit_logs (timestamp, user_id)"))
 
 
 def reset_db() -> None:
