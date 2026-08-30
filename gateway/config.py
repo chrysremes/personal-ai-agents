@@ -39,7 +39,7 @@ class AuthYaml(BaseModel):
 class OllamaYaml(BaseModel):
     """Ollama defaults loaded from YAML."""
 
-    base_url: str = "http://ollama:11434"
+    base_url: str = "http://127.0.0.1:11434"
     timeout_seconds: int = 120
     max_retries: int = 3
     retry_backoff_ms: list[int] = Field(default_factory=lambda: [1000, 2000, 4000])
@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     gateway_refresh_token_expiry_days: int = Field(7, alias="GATEWAY_REFRESH_TOKEN_EXPIRY_DAYS")
     password_min_length: int = Field(8, alias="GATEWAY_PASSWORD_MIN_LENGTH")
 
-    ollama_base_url: str = Field("http://ollama:11434", alias="OLLAMA_BASE_URL")
+    ollama_base_url: str = Field("http://127.0.0.1:11434", alias="OLLAMA_BASE_URL")
     ollama_timeout_seconds: int = Field(120, alias="OLLAMA_TIMEOUT_SECONDS")
     ollama_max_retries: int = Field(3, alias="OLLAMA_MAX_RETRIES")
     ollama_retry_backoff_ms: list[int] = Field(default_factory=lambda: [1000, 2000, 4000])

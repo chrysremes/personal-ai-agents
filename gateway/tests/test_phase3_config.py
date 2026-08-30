@@ -44,7 +44,13 @@ def test_yaml_configures_all_documented_runtime_sections(
     """Server, database, auth, Ollama, and audit values load from YAML."""
     config_path = tmp_path / "config.yaml"
     write_config(config_path)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GATEWAY_ENV", raising=False)
+    monkeypatch.delenv("GATEWAY_HOST", raising=False)
+    monkeypatch.delenv("GATEWAY_PORT", raising=False)
+    monkeypatch.delenv("GATEWAY_DB_PATH", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("GATEWAY_LOG_AUDIT_RETENTION_DAYS", raising=False)
     monkeypatch.setenv("GATEWAY_JWT_SECRET", "x" * 40)
 
     loaded = load_config(config_path)
@@ -71,6 +77,7 @@ def test_environment_values_override_yaml(
     """Deployment environment values take precedence over YAML defaults."""
     config_path = tmp_path / "config.yaml"
     write_config(config_path)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GATEWAY_JWT_SECRET", "x" * 40)
     monkeypatch.setenv("GATEWAY_PORT", "9200")
     monkeypatch.setenv("GATEWAY_DB_PATH", "/tmp/from-env.db")
@@ -83,3 +90,17 @@ def test_environment_values_override_yaml(
     assert loaded.gateway_db_path == "/tmp/from-env.db"
     assert loaded.ollama_base_url == "http://env-ollama:11434"
     assert loaded.audit_retention_days == 30
+
+
+def test_default_runtime_ollama_url_targets_host_loopback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Phase 3 default runtime uses host Ollama, not a Compose service."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GATEWAY_JWT_SECRET", "x" * 40)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+
+    loaded = load_config(tmp_path / "missing-config.yaml")
+
+    assert loaded.ollama_base_url == "http://127.0.0.1:11434"

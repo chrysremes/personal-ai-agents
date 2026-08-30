@@ -51,7 +51,7 @@ The Agent Gateway is a FastAPI service running in Docker that:
 
 - Docker & Docker Compose
 - Linux host with 2+ cores, 4GB+ RAM
-- Ollama running with Qwen models (Phase 2+)
+- Host `ollama.service` running with Qwen models (Phase 2+)
 
 ### Setup
 
@@ -67,18 +67,23 @@ The Agent Gateway is a FastAPI service running in Docker that:
    # IMPORTANT: Set GATEWAY_JWT_SECRET to a random string (min 32 chars)
    ```
 
-3. **Start services with Docker Compose:**
+3. **Verify host Ollama and Compose configuration:**
    ```bash
-   docker-compose up -d
+   ./scripts/check-phase3-runtime.sh
    ```
 
-4. **Verify Gateway is running:**
+4. **Start the Gateway with Docker Compose:**
+   ```bash
+   docker compose up --build -d gateway
+   ```
+
+5. **Verify Gateway is running:**
    ```bash
    curl http://localhost:8000/health
    # Expected keys: status, database, ollama, queue_depth
    ```
 
-5. **Create first user (one-time setup):**
+6. **Create first user (one-time setup):**
    ```bash
    curl -X POST http://localhost:8000/admin/setup/user \
      -H "Content-Type: application/json" \
@@ -122,7 +127,7 @@ Key variables (see `.env.example` for complete list):
 - `GATEWAY_JWT_SECRET`: Secret key for JWT signing (min 32 characters, required)
 - `GATEWAY_DB_PATH`: SQLite database path (default: `/data/ai-platform/gateway.db`)
 - `GATEWAY_LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
-- `OLLAMA_BASE_URL`: Ollama API endpoint (default: `http://ollama:11434`)
+- `OLLAMA_BASE_URL`: Ollama API endpoint (default: `http://127.0.0.1:11434`)
 - `CLAUDE_API_KEY`: Claude API key (optional, for Phase 7+)
 
 ### config.yaml
@@ -427,7 +432,7 @@ The SQLite database is created automatically at startup. To reset:
 rm /data/ai-platform/gateway.db
 
 # Restart the service
-docker-compose restart gateway
+docker compose restart gateway
 ```
 
 ## Security
@@ -507,7 +512,7 @@ docker logs gateway
 **Common issues:**
 - `GATEWAY_JWT_SECRET` not set or too short
 - Database file path not writable
-- Ollama not responding
+- Host `ollama.service` not active or `http://127.0.0.1:11434/api/tags` not responding
 
 ### High latency
 

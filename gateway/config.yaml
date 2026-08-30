@@ -57,7 +57,7 @@ auth:
 
 # Ollama Configuration
 ollama:
-  base_url: http://ollama:11434
+  base_url: http://127.0.0.1:11434
   timeout_seconds: 30
   max_retries: 3
 

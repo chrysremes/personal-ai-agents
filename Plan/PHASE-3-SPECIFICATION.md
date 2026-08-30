@@ -19,7 +19,14 @@ The Agent Gateway is a FastAPI service running in Docker that:
 - **Logs** all actions for audit trails.
 - **Manages** sessions and user permissions.
 
-The Gateway is stateless (JWTs are self-contained), runs in Docker, and is orchestrated via Docker Compose alongside Ollama.
+The Gateway is stateless (JWTs are self-contained), runs in Docker, and is orchestrated via Docker Compose.
+
+**2026-08-30 implementation note:** On the Acer Aspire deployment, Phase 3 uses
+the Phase 2 host `ollama.service` as the single local inference runtime because
+that service already carries the host-specific Vulkan setup. Docker Compose
+starts the Gateway container only, with host networking, and the Gateway calls
+Ollama at `http://127.0.0.1:11434`. See
+[ADR-0004](../docs/adr/0004-host-ollama-runtime-for-phase-3.md).
 
 ---
 
@@ -657,7 +664,7 @@ GATEWAY_JWT_ALGORITHM=HS256
 GATEWAY_DB_PATH=/data/ai-platform/gateway.db   # SQLite file path
 
 # Ollama
-OLLAMA_BASE_URL=http://ollama:11434            # Docker internal hostname
+OLLAMA_BASE_URL=http://127.0.0.1:11434        # Host ollama.service
 
 # Claude Code (if using)
 CLAUDE_API_KEY=<anthropic_api_key>             # Set only if Claude Code is enabled
@@ -688,7 +695,7 @@ models:
   timeout_default_seconds: 120
 
 ollama:
-  base_url: http://ollama:11434
+  base_url: http://127.0.0.1:11434
   max_retries: 3
   retry_backoff_ms: [1000, 2000, 4000]
 
@@ -739,36 +746,19 @@ CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ```yaml
 ---
-version: '3.8'
-
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - /mnt/data/ai-platform/models:/root/.ollama
-    environment:
-      CUDA_VISIBLE_DEVICES: ""  # Force Vulkan backend (Phase 2 decision)
-      OLLAMA_MAX_LOADED_MODELS: 1
-    restart: unless-stopped
-
   gateway:
     build: .
     container_name: gateway
-    ports:
-      - "8000:8000"
+    network_mode: host
     volumes:
       - /mnt/data/ai-platform:/data/ai-platform
       - /etc/ai-platform/secrets:/secrets:ro
     environment:
       GATEWAY_ENV: production
       GATEWAY_DB_PATH: /data/ai-platform/gateway.db
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
       CLAUDE_API_KEY_FILE: /secrets/claude-api-key
-    depends_on:
-      - ollama
     restart: unless-stopped
 ```
 

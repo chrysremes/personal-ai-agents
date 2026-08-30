@@ -1,10 +1,10 @@
 #!/bin/bash
 # Health check script for Agent Gateway
-# Waits for Ollama to be healthy before returning success
+# Waits for the host Ollama service to be healthy before returning success
 
 set -e
 
-OLLAMA_URL="${OLLAMA_BASE_URL:-http://ollama:11434}"
+OLLAMA_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
 MAX_RETRIES=30
 RETRY_INTERVAL=1
 

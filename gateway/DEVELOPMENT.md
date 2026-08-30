@@ -28,7 +28,8 @@ gateway/
 │   └── claude.py          # Claude provider stub
 │
 ├── scripts/
-│   └── wait-for-ollama.sh # Docker health check
+│   ├── wait-for-ollama.sh # Legacy Ollama health wait helper
+│   └── check-phase3-runtime.sh # Host Ollama preflight
 │
 ├── tests/
 │   └── test_core.py       # Core unit tests
@@ -250,8 +251,8 @@ docker build -t agent-gateway:latest .
 ### Run Container
 
 ```bash
-docker run -p 8000:8000 \
-  -e GATEWAY_JWT_SECRET="your-secret-key" \
+docker run --network host \
+  -e GATEWAY_JWT_SECRET="your-secret-key-min-32-chars" \
   -v /data/ai-platform:/data/ai-platform \
   agent-gateway:latest
 ```
@@ -259,14 +260,17 @@ docker run -p 8000:8000 \
 ### Docker Compose
 
 ```bash
-# Start services
-docker-compose up -d
+# Confirm host Ollama, port 8000, JWT secret, and Compose config
+./scripts/check-phase3-runtime.sh
+
+# Start the Gateway container
+docker compose up --build -d gateway
 
 # Check logs
-docker-compose logs -f gateway
+docker compose logs -f gateway
 
 # Stop services
-docker-compose down
+docker compose down
 ```
 
 ## Debugging

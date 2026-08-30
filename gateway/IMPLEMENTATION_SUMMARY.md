@@ -60,9 +60,9 @@ Agent Gateway is a FastAPI service that serves as the central routing, authentic
 
 ### Epic 7: Docker & Deployment ✅
 - [x] Dockerfile with health checks
-- [x] docker-compose.yml with Ollama + Gateway
+- [x] docker-compose.yml with Gateway using host `ollama.service`
 - [x] .env.example with all variables
-- [x] Health check script (wait-for-ollama.sh)
+- [x] Runtime preflight script (`check-phase3-runtime.sh`)
 - [x] Proper volume mounts for persistence
 
 ### Epic 9: Documentation ✅
@@ -217,8 +217,9 @@ GET /audit/logs?user_id=X&start_time=T1&end_time=T2&agent=A&result=R
 cp .env.example .env
 # Edit .env: Set GATEWAY_JWT_SECRET to random 32+ char string
 
-# 2. Start services
-docker-compose up -d
+# 2. Verify host Ollama and start Gateway
+./scripts/check-phase3-runtime.sh
+docker compose up --build -d gateway
 
 # 3. Create first user
 curl -X POST http://localhost:8000/admin/setup/user \
@@ -322,8 +323,9 @@ Phase 3 is complete when:
 
 ### Deployment
 - `Dockerfile` - Container image
-- `docker-compose.yml` - Orchestration
-- `scripts/wait-for-ollama.sh` - Health check
+- `docker-compose.yml` - Gateway orchestration using host Ollama
+- `scripts/check-phase3-runtime.sh` - Host runtime preflight
+- `scripts/wait-for-ollama.sh` - Legacy Ollama wait helper
 - `.env.example` - Configuration template
 - `.gitignore` - Git configuration
 
